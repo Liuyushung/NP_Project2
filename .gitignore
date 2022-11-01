@@ -48,3 +48,10 @@ Thumbs.db
 *.mov
 *.wmv
 
+*.o
+npshell
+.vscode
+bin/*
+np_simple
+np_multi_proc
+np_single_proc
