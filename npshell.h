@@ -565,9 +565,12 @@ int run_npshell() {
         cout << "% "; fflush(stdout);
         input.clear();
         getline(cin, input);
+        #if 0
+        cout << "Input: " << input << endl;
+        #endif
 
         if (cin.eof()) {
-            exit(0);
+            return 0;
         }
 
         if ( input.empty() || is_white_char(input) ) {
@@ -575,6 +578,8 @@ int run_npshell() {
             continue;
         }
 
+		input.erase(remove(input.begin(), input.end(), '\n'),input.end());
+		input.erase(remove(input.begin(), input.end(), '\r'),input.end());
         parse_command(input);
     }
 
