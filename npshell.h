@@ -12,7 +12,8 @@
 
 using namespace std;
 
-// #define DEBUG 0
+namespace npshell {
+    
 #define DEBUG_CMD   0
 #define DEBUG_ARG   1
 
@@ -569,7 +570,8 @@ int run_npshell() {
         cout << "Input: " << input << endl;
         #endif
 
-        if (cin.eof()) {
+        const char c = input.c_str()[0];
+        if (cin.eof() || c == 4) {
             return 0;
         }
 
@@ -585,3 +587,4 @@ int run_npshell() {
 
     return 0;
 }
+} // namespace npshell

@@ -15,6 +15,8 @@
 #include "npshell.h"
 
 using namespace std;
+using npshell::child_handler;
+using npshell::run_npshell;
 
 int get_listen_socket(const char *port) {
     struct sockaddr_in s_addr;
@@ -61,12 +63,13 @@ int main(int argc,char const *argv[]) {
 
     struct sockaddr_in c_addr;
     int listen_sock, client_sock, c_addr_len;
-    int status_code;
+    int status_code, optval = 1;
 
     bzero((char *)&c_addr, sizeof(c_addr));
 
     listen_sock = get_listen_socket(argv[1]);
-
+    setsockopt(listen_sock, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int));
+    
     signal(SIGCHLD, child_handler);
 
     while (1) {
@@ -76,7 +79,7 @@ int main(int argc,char const *argv[]) {
             perror("Sever accept");
             exit(0);
         }
-        #if 1
+        #if 0
         cout << "Accept connection: " << client_sock << endl;
         #endif
 
@@ -100,5 +103,4 @@ int main(int argc,char const *argv[]) {
             exit(0);
         }
     }
-
 }
