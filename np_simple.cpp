@@ -5,7 +5,6 @@
 #include "npshell.h"
 
 using namespace std;
-using npshell::child_handler;
 using npshell::run_npshell;
 
 int main(int argc,char const *argv[]) {

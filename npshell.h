@@ -87,18 +87,6 @@ void interrupt_handler(int sig) {
     return;
 }
 
-void child_handler(int sig) {
-    // Handle SIGCHLD
-    // Prevent the zombie process
-    int stat;
-
-    while(waitpid(-1, &stat, WNOHANG) > 0) {
-        // Remove zombie process
-    }
-
-    return;
-}
-
 bool is_white_char(string cmd) {
     for (size_t i = 0; i < cmd.length(); i++) {
         if(isspace(cmd[i]) == 0) {
