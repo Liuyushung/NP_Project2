@@ -13,19 +13,18 @@
 #include <arpa/inet.h>
 
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <map>
+#include <algorithm>
 
 using namespace std;
 
+#define MAX_BUF_SIZE    15000
+#define CMD_EXIT    99
+
 namespace user_space {
-    // int UID = 1;
-
-    // int get_uid() {
-    //     return UID++;
-    // }
-
-
+    // TODO: maintain env
     class UserInfo {
     private:
         static int UID;
@@ -33,30 +32,27 @@ namespace user_space {
         int id, sock;
         string name;
         sockaddr_in addr;
+        map<string, string> env;
 
     public:
-
         UserInfo() {}
         UserInfo(int id, int sock, string name, sockaddr_in addr) {
             this->id   = id;
             this->sock = sock;
             this->name = name;
             this->addr = addr;
+            this->env = {{"PATH", "bin:."}};
         }
 
         /* Static methods */
-        static UserInfo create_user(int sock, sockaddr_in addr) {
+        static UserInfo *create_user(int sock, sockaddr_in addr) {
             // TODO: UID range 1~30
             static string default_name = string("(no name)");
-            UserInfo user = UserInfo(UID, sock, default_name, addr);
+            UserInfo *user = new UserInfo(UID, sock, default_name, addr);
             ++UID;
 
             return user; 
         }
-
-
-
-
 
         /* Member methods */
         int get_id()         { return this->id;  }
@@ -64,9 +60,14 @@ namespace user_space {
         string get_name()    { return this->name; }
         string get_ip_addr() { return string(inet_ntoa(this->addr.sin_addr));  }
         int get_port()       { return ntohs(this->addr.sin_port); }
+        map<string, string> get_env() { return this->env; }
 
         void set_name(string new_name) {
             this->name = new_name;
+        }
+
+        void set_env(string key, string val) {
+            this->env[key] = val;
         }
 
         void show() {
@@ -80,51 +81,318 @@ namespace user_space {
     int UserInfo::UID = 1;
 
     /* User Table */
-    map<int, UserInfo> user_table = {}; // uid: user
+    class UserTable {
+    public:
+        map<int, UserInfo *> table; // uid: user
 
-    void add_user(UserInfo user) {
-        // user_table[user.get_id()] = user;
-        pair<int, UserInfo> p(user.get_id(), user);
-        user_table.insert(p);
-    }
+        UserTable() {
+            this->table = {};
+        }
 
-    void del_user(int id) {
-        user_table.erase(id);
-    }
+        void add_user(UserInfo *user) {
+            // user_table[user.get_id()] = user;
+            pair<int, UserInfo *> p(user->get_id(), user);
+            this->table.insert(p);
+        }
 
-    bool has_user(int id) {
-        map<int, UserInfo>::iterator iter = user_table.find(id);
-        return (iter != user_table.end());
-    }
+        void del_user(int id) {
+            this->table.erase(id);
+        }
 
-    UserInfo get_user_by_id(int id) {
-        return user_table[id];
-    }
+        bool has_user(int id) {
+            map<int, UserInfo *>::iterator iter = this->table.find(id);
+            return (iter != this->table.end());
+        }
 
-    UserInfo get_user_by_sockfd(int sockfd) {
-        int tid;
-        for (auto &elem: user_table) {
-            if (elem.second.get_sockfd() == sockfd) {
-                tid = elem.first;
+        UserInfo *get_user_by_id(int id) {
+            return this->table[id];
+        }
+
+        UserInfo *get_user_by_sockfd(int sockfd) {
+            int tid;
+            for (auto &elem: this->table) {
+                if (elem.second->get_sockfd() == sockfd) {
+                    tid = elem.first;
+                }
+            }
+            return this->table[tid];
+        }
+
+        void show_table() {
+            for (auto &elem: this->table) {
+                elem.second->show();
             }
         }
-        return user_table[tid];
-    }
+    };
 
-    void show_table() {
-        for (auto &elem: user_table) {
-            elem.second.show();
-        }
-    }
+    UserTable user_table;
+    /* User Table End */
 }
 
-
-
+/* Function Prototype */
 void child_handler(int sig);
 void interrupt_handler(int sig);
 
+void load_user_config(user_space::UserInfo *me);
 int get_listen_socket(const char *port);
 
+string read_msg(int sockfd);
+void sendout_msg(int sockfd, string &msg);
+
+void broadcast(string msg);
+void login_prompt();
+void logout_prompt();
+void command_prompt(user_space::UserInfo *me);
+void welcome(user_space::UserInfo *me);
+
+// Built-in Command
+void my_setenv(user_space::UserInfo *me, string var, string value);
+void my_printenv(user_space::UserInfo *me, string var);
+void my_exit(user_space::UserInfo *me);
+void who(user_space::UserInfo *me);
+void tell(int id, string msg);
+void yell(string msg);
+void name_cmd(string name);
+int handle_builtin(user_space::UserInfo *me, string cmd);
+// Built-in Command End
+
+int handle_client(int sockfd);
+int run_shell(user_space::UserInfo *me, string msg);
+/* Function Prototype End */
+
+/* Function Definition */
+void load_user_config(user_space::UserInfo *me) {
+    map<string, string> env = me->get_env();
+
+    clearenv();
+    for (auto &elem: env) {
+        setenv(elem.first.c_str(), elem.second.c_str(), 1);
+    }
+}
+
+void login_prompt(user_space::UserInfo *me) {
+    ostringstream oss;
+    string msg;
+
+    // Create message
+    oss << "*** User '" << me->get_name() << "' entered from " << me->get_ip_addr() << ":" << me->get_port() << ". ***" << endl;
+    msg = oss.str();
+
+    // Broadcast
+    broadcast(msg);
+}
+
+void logout_prompt(user_space::UserInfo *me) {
+    ostringstream oss;
+    string msg;
+
+    // Create message
+    oss << "*** User '" << me->get_name() << "' left. ***" << endl;
+    msg = oss.str();
+
+    // Broadcast
+    broadcast(msg);
+}
+
+void command_prompt(user_space::UserInfo *me) {
+    string msg("% ");
+    sendout_msg(me->get_sockfd(), msg);
+}
+
+void welcome(user_space::UserInfo *me) {
+    ostringstream oss;
+    string msg;
+
+    oss << "****************************************" << endl
+        << "** Welcome to the information server. **" << endl
+        << "****************************************" << endl;
+    msg = oss.str();
+
+    sendout_msg(me->get_sockfd(), msg);
+}
+
+string read_msg(int sockfd) {
+    char buf[MAX_BUF_SIZE];
+    bzero(buf, MAX_BUF_SIZE);
+
+    read(sockfd, buf, MAX_BUF_SIZE);
+
+    string msg(buf);
+    msg.erase(remove(msg.begin(), msg.end(), '\n'), msg.end());
+    msg.erase(remove(msg.begin(), msg.end(), '\r'), msg.end());
+    #if 1
+    printf("Recv (%ld): %s\n", msg.length(), msg.c_str());
+    #endif
+
+    return msg;
+}
+
+void sendout_msg(int sockfd, string &msg) {
+    int n = write(sockfd, msg.c_str(), msg.length());
+    if (n < 0) {
+        perror("Sendout Message");
+        exit(0);
+    }
+}
+
+void broadcast(string msg) {
+    for (auto &elem: user_space::user_table.table) {
+        sendout_msg(elem.second->get_sockfd(), msg);
+    }
+}
+
+// Built-in Command
+void my_setenv(user_space::UserInfo *me, string var, string value) {
+    setenv(var.c_str(), value.c_str(), 1);
+    me->set_env(var, value);
+}
+
+void my_printenv(user_space::UserInfo *me, string var) {
+    char *value = getenv(var.c_str());
+    
+    if (value) {
+        ostringstream oss;
+        string msg;
+
+        oss << value << endl;
+        msg = oss.str();
+
+        sendout_msg(me->get_sockfd(), msg);
+    }
+}
+
+void my_exit(user_space::UserInfo *me) {
+    user_space::user_table.del_user(me->get_id());
+    logout_prompt(me);
+    close(me->get_sockfd());
+}
+
+void who(user_space::UserInfo *me) {
+    ostringstream oss;
+    string tab("\t"), is_me("<-me"), msg;
+
+    // Create Message
+    oss << "<ID>\t<nickname>\t<IP:port>\t<indicate me>" << endl;
+    for (auto& elem: user_space::user_table.table) {
+        oss << elem.second->get_id() << tab
+            << elem.second->get_name() << tab
+            << elem.second->get_ip_addr() << ":" << elem.second->get_port() << tab
+            << ((elem.second->get_id() == me->get_id()) ? is_me : "")
+            << endl;
+    }
+    msg = oss.str();
+
+    // Send out Message
+    sendout_msg(me->get_sockfd(), msg);
+}
+
+void tell(user_space::UserInfo *me, int id, string msg) {
+    ostringstream oss;
+
+    if (user_space::user_table.has_user(id)) {
+        user_space::UserInfo *target_user = user_space::user_table.get_user_by_id(id);
+
+        // Create message
+        oss << "*** " << me->get_name() << " told you ***: " << msg << endl;
+        msg = oss.str();
+
+        // Send out message
+        sendout_msg(target_user->get_sockfd(), msg);
+    } else {
+        // User is not exist
+        oss << "*** Error: user #" << id << " does not exist yet. ***" << endl;
+        msg = oss.str();
+
+        sendout_msg(me->get_sockfd(), msg);
+    }
+}
+
+void yell(user_space::UserInfo *me, string msg) {
+    ostringstream oss;
+    
+    // Create message
+    oss << "*** " << me->get_name() << " yelled ***: " << msg << endl;
+    msg = oss.str();
+
+    // Broadcast message
+    broadcast(msg);
+}
+
+void name_cmd(user_space::UserInfo *me, string name) {
+    ostringstream oss;
+    string msg;
+
+    // Check name
+    for (auto &elem: user_space::user_table.table) {
+        if (name.compare(elem.second->get_name()) == 0) {
+            // The name is already exist
+            oss << "*** User '" << name << "' already exists. ***" << endl;
+            msg = oss.str();
+            sendout_msg(me->get_sockfd(), msg);
+            return;
+        }
+    }
+
+    // Change name and broadcast message
+    me->set_name(name);
+    oss << "*** User from " << me->get_ip_addr() << ":" << me->get_port() << " is named '" << name << "'. ***" << endl;
+    msg = oss.str();
+
+    broadcast(msg);
+}
+
+int handle_builtin(user_space::UserInfo *me, string cmd) {
+    istringstream iss(cmd);
+    string prog;
+    int result_code = 0;
+
+    getline(iss, prog, ' ');
+
+    if (prog == "setenv") {
+        string var, value;
+
+        getline(iss, var, ' ');
+        getline(iss, value, ' ');
+        my_setenv(me, var, value);
+
+    } else if (prog == "printenv") {
+        string var;
+
+        getline(iss, var, ' ');
+        my_printenv(me, var);
+
+    } else if (prog == "exit") {
+        my_exit(me);
+        result_code = CMD_EXIT;
+
+    } else if (prog == "who") {
+        who(me);
+
+    } else if (prog == "tell") {
+        string id, msg;
+
+        getline(iss, id, ' ');
+        getline(iss, msg);
+
+        tell(me, atoi(id.c_str()), msg);
+
+    } else if (prog == "yell") {
+        string msg;
+
+        getline(iss, msg);
+        yell(me, msg);
+
+    } else if (prog == "name") {
+        string new_name;
+        
+        getline(iss, new_name, ' ');
+        name_cmd(me, new_name);
+
+    }
+
+    return result_code;
+}
+// Built-in Command End
 
 void child_handler(int sig) {
     // Handle SIGCHLD
@@ -137,7 +405,6 @@ void child_handler(int sig) {
 
     return;
 }
-
 
 int get_listen_socket(const char *port) {
     struct sockaddr_in s_addr;

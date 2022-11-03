@@ -12,7 +12,36 @@ int listen_sock;
 void interrupt_handler(int sig) {
     // Handle SIGINT
     close(listen_sock);
+    for (auto &elem: user_table.table) {
+        close(elem.second->get_sockfd());
+    }
     exit(0);
+}
+
+int handle_client(int sockfd) {
+    // Get user
+    UserInfo *client = user_table.get_user_by_sockfd(sockfd);
+
+    // Get message
+    string msg = read_msg(sockfd);
+
+    // Run shell
+    int code = run_shell(client, msg);
+    if (code != CMD_EXIT) {
+        command_prompt(client);
+    }
+
+    return code;
+}
+
+int run_shell(user_space::UserInfo *me, string msg) {
+    // Load user config
+    load_user_config(me);
+
+    // Parse message
+
+    // Handle message
+    return handle_builtin(me, msg);
 }
 
 
@@ -59,29 +88,32 @@ int main(int argc,char const *argv[]) {
                 perror("Sever accept");
                 exit(0);
             }
+
             FD_SET(client_sock, &afds);
-            UserInfo user = UserInfo::create_user(client_sock, c_addr);
-            add_user(user);
-            #if 1
-            show_table();
+            UserInfo *client = UserInfo::create_user(client_sock, c_addr);
+            user_table.add_user(client);
+
+            welcome(client);
+            login_prompt(client);
+            command_prompt(client);
+
+            #if 0
+            user_table.show_table();
             #endif
         }
         
         // Check if there are sockets are ready to be read
         for(int fd = 3; fd < nfds; ++fd) {
             if(fd != listen_sock && FD_ISSET(fd, &rfds)) {
-                char buf[128]; bzero(buf, 128);
-                int n = read(fd, buf, 128);
-                cout << "(" << n << ") " << "Read: " << buf << endl;
+                int n = handle_client(fd);
 
-                // User leave
-                close(fd);
-                FD_CLR(fd, &afds);
-                del_user(get_user_by_sockfd(fd).get_id());
+                if (n == CMD_EXIT) {
+                    // User leave
+                    FD_CLR(fd, &afds);
+                }
             }
         }
-
-
     }
-
+    
+    return 0;
 }
