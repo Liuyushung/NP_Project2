@@ -1,6 +1,6 @@
 /* Server 2 */
 /* Single-process concurrent (use select) */
-#include "common.h"
+#include "np_single_proc.h"
 
 #define USER_LIMIT   31
 
@@ -17,33 +17,6 @@ void interrupt_handler(int sig) {
     }
     exit(0);
 }
-
-int handle_client(int sockfd) {
-    // Get user
-    UserInfo *client = user_table.get_user_by_sockfd(sockfd);
-
-    // Get message
-    string msg = read_msg(sockfd);
-
-    // Run shell
-    int code = run_shell(client, msg);
-    if (code != CMD_EXIT) {
-        command_prompt(client);
-    }
-
-    return code;
-}
-
-int run_shell(user_space::UserInfo *me, string msg) {
-    // Load user config
-    load_user_config(me);
-
-    // Parse message
-
-    // Handle message
-    return handle_builtin(me, msg);
-}
-
 
 int main(int argc,char const *argv[]) {
     if (argc != 2) {
@@ -107,7 +80,7 @@ int main(int argc,char const *argv[]) {
             if(fd != listen_sock && FD_ISSET(fd, &rfds)) {
                 int n = handle_client(fd);
 
-                if (n == CMD_EXIT) {
+                if (n == BUILT_IN_EXIT) {
                     // User leave
                     FD_CLR(fd, &afds);
                 }

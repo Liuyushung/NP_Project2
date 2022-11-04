@@ -304,7 +304,7 @@ void execute_command(vector<string> args) {
     }
 }
 
-void main_handler(Command &command) {
+void main_executor(Command &command) {
     /* Pre-Process */
     decrement_and_cleanup_number_pipes();
     if (command.cmds.size() == 1) {
@@ -539,7 +539,7 @@ void parse_command(string input) {
 
     for (size_t i = 0; i < lines.size(); i++) {
         // cout << "CMD " << i << ": " << lines[i].cmd << "X" << endl;
-        main_handler(lines[i]);
+        main_executor(lines[i]);
     }
 }
 

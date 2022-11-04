@@ -21,10 +21,11 @@
 using namespace std;
 
 #define MAX_BUF_SIZE    15000
-#define CMD_EXIT    99
+#define BUILT_IN_EXIT   99
+#define BUILT_IN_TRUE   1
+#define BUILT_IN_FALSE  0
 
 namespace user_space {
-    // TODO: maintain env
     class UserInfo {
     private:
         static int UID;
@@ -156,8 +157,6 @@ void name_cmd(string name);
 int handle_builtin(user_space::UserInfo *me, string cmd);
 // Built-in Command End
 
-int handle_client(int sockfd);
-int run_shell(user_space::UserInfo *me, string msg);
 /* Function Prototype End */
 
 /* Function Definition */
@@ -344,7 +343,6 @@ void name_cmd(user_space::UserInfo *me, string name) {
 int handle_builtin(user_space::UserInfo *me, string cmd) {
     istringstream iss(cmd);
     string prog;
-    int result_code = 0;
 
     getline(iss, prog, ' ');
 
@@ -355,19 +353,22 @@ int handle_builtin(user_space::UserInfo *me, string cmd) {
         getline(iss, value, ' ');
         my_setenv(me, var, value);
 
+        return BUILT_IN_TRUE;
     } else if (prog == "printenv") {
         string var;
 
         getline(iss, var, ' ');
         my_printenv(me, var);
 
+        return BUILT_IN_TRUE;
     } else if (prog == "exit") {
         my_exit(me);
-        result_code = CMD_EXIT;
 
+        return BUILT_IN_EXIT;
     } else if (prog == "who") {
         who(me);
 
+        return BUILT_IN_TRUE;
     } else if (prog == "tell") {
         string id, msg;
 
@@ -376,21 +377,24 @@ int handle_builtin(user_space::UserInfo *me, string cmd) {
 
         tell(me, atoi(id.c_str()), msg);
 
+        return BUILT_IN_TRUE;
     } else if (prog == "yell") {
         string msg;
 
         getline(iss, msg);
         yell(me, msg);
 
+        return BUILT_IN_TRUE;
     } else if (prog == "name") {
         string new_name;
         
         getline(iss, new_name, ' ');
         name_cmd(me, new_name);
 
+        return BUILT_IN_TRUE;
     }
 
-    return result_code;
+    return BUILT_IN_FALSE;
 }
 // Built-in Command End
 
