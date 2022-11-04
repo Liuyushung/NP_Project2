@@ -373,7 +373,9 @@ int main_executor(user_space::UserInfo *me, Command &command) {
 
             if (is_final_cmd) {
                 if (is_number_pipe) {
-                    /* Setup Input */
+                    /* Number Pipe */
+                    
+                    // Setup Input
                     if (pipes.size() > 0) {
                         // Receive from previous command via normal pipe
                         dup2(pipes[i-1].in, STDIN_FILENO);
@@ -381,7 +383,8 @@ int main_executor(user_space::UserInfo *me, Command &command) {
                         cerr << "Final number Pipe (in) (from normal pip) " << pipes[i-1].in << " to " <<STDIN_FILENO << endl;
                         #endif
                     }
-                    /* Setup Output */
+                    
+                    // Setup Output
                     for (size_t x = 0; x < number_pipes.size(); x++) {
                         if (number_pipes[x].number == command.number) {
                             dup2(number_pipes[x].out, STDOUT_FILENO);
@@ -393,6 +396,7 @@ int main_executor(user_space::UserInfo *me, Command &command) {
                         }
                     }
                 } else if (is_error_pipe) {
+                    /* Error Pipe */
                     for (size_t x = 0; x < number_pipes.size(); x++) {
                         if (number_pipes[x].number == command.number) {
                             dup2(number_pipes[x].out, STDOUT_FILENO);
@@ -401,12 +405,16 @@ int main_executor(user_space::UserInfo *me, Command &command) {
                         }
                     }
                 } else {
+                    /* Normal Pipe*/
                     if (pipes.size() > 0) {
                         dup2(pipes[i-1].in, STDIN_FILENO);
                         #if 0
                         cout << "Final Pipe (out) " << pipes[i-1].in << " to " << STDIN_FILENO << endl;
                         #endif
                     }
+                    
+                    // Redirect to socket
+                    dup2(me->get_sockfd(), STDOUT_FILENO);
                 }
             }
 
