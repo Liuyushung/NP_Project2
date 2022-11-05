@@ -26,6 +26,31 @@ using namespace std;
 #define BUILT_IN_FALSE  0
 #define USER_LIMIT      30
 
+typedef struct mypipe {
+    int in;
+    int out;
+} Pipe;
+
+typedef struct my_number_pipe {
+    int in;
+    int out;
+    int number;
+} NumberPipe;
+
+typedef struct my_command {
+    string cmd;           // Cut by number|error pipe
+    vector<string> cmds;  // Split by pipe
+    int number;           // For number pipe
+    int in_fd, out_fd;    // For user pipe
+} Command;
+
+typedef struct my_user_pipe {
+    int src_uid;
+    int dst_uid;
+    Pipe pipe;
+    bool is_done;
+} UserPipe;
+
 namespace user_space {
     class UserInfo {
     private:
@@ -37,6 +62,9 @@ namespace user_space {
         map<string, string> env;
 
     public:
+        vector<Pipe> pipes;
+        vector<NumberPipe> number_pipes;
+
         UserInfo() {}
         UserInfo(int id, int sock, string name, sockaddr_in addr) {
             this->id   = id;

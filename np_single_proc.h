@@ -9,31 +9,6 @@
 
 #define DEFAULT_FD  -1
 
-typedef struct mypipe {
-    int in;
-    int out;
-} Pipe;
-
-typedef struct my_number_pipe {
-    int in;
-    int out;
-    int number;
-} NumberPipe;
-
-typedef struct my_command {
-    string cmd;           // Cut by number|error pipe
-    vector<string> cmds;  // Split by pipe
-    int number;           // For number pipe
-    int in_fd, out_fd;    // For user pipe
-} Command;
-
-typedef struct my_user_pipe {
-    int src_uid;
-    int dst_uid;
-    Pipe pipe;
-    bool is_done;
-} UserPipe;
-
 bool is_white_char(string cmd);
 void clean_user_pipe();
 int search_user_pipe(int src_uid, int dst_uid, int *up_idx);
@@ -41,7 +16,7 @@ int create_user_pipe(user_space::UserInfo *me, int dst_uid);
 void check_user_pipe(string cmd, bool *in, bool *out);
 bool handle_input_user_pipe(user_space::UserInfo *me, string cmd, int *up_idx);
 bool handle_output_user_pipe(user_space::UserInfo *me, string cmd, int *up_idx);
-void decrement_and_cleanup_number_pipes();
+void decrement_and_cleanup_number_pipes(vector<NumberPipe> &number_pipes);
 
 vector<string> parse_normal_pipe(string input);
 vector<Command> parse_number_pipe(string input);
@@ -55,14 +30,14 @@ int run_shell(user_space::UserInfo *me, string msg);
 int handle_client(int sockfd);
 
 /* Global Variables */
-vector<Pipe> pipes;
-vector<NumberPipe> number_pipes;
+// vector<Pipe> pipes;
+// vector<NumberPipe> number_pipes;
 vector<UserPipe> user_pipes;
 regex up_in_pattern("[<][1-9]\\d?\\d?\\d?[0]?");
 regex up_out_pattern("[>][1-9]\\d?\\d?\\d?[0]?");
 string original_command;
 
-void debug_number_pipes() {
+void debug_number_pipes(vector<NumberPipe> number_pipes) {
     if (number_pipes.size() > 0) {    
         cerr << "Number Pipes" << endl;
         for (size_t i = 0; i < number_pipes.size(); i++) {
@@ -74,7 +49,7 @@ void debug_number_pipes() {
     }
 }
 
-void debug_pipes() {
+void debug_pipes(vector<Pipe> pipes) {
     if (pipes.size() > 0) {
         cerr << "Pipes" << endl;
         for (size_t i = 0; i < pipes.size(); i++) {
@@ -262,7 +237,7 @@ bool handle_output_user_pipe(user_space::UserInfo *me, string cmd, int *up_idx) 
     return error;
 }
 
-void decrement_and_cleanup_number_pipes() {
+void decrement_and_cleanup_number_pipes(vector<NumberPipe> &number_pipes) {
     vector<int> index;
 
     for (size_t i = 0; i < number_pipes.size(); i++) {
@@ -399,7 +374,7 @@ void execute_command(user_space::UserInfo *me, vector<string> args) {
 
 int main_executor(user_space::UserInfo *me, Command &command) {
     /* Pre-Process */
-    decrement_and_cleanup_number_pipes();
+    decrement_and_cleanup_number_pipes(me->number_pipes);
     if (command.cmds.size() == 1) {
         int code = handle_builtin(me, command.cmds[0]);
         if (code != BUILT_IN_FALSE) {
@@ -461,12 +436,12 @@ int main_executor(user_space::UserInfo *me, Command &command) {
                     bool is_add = false;
                     ignore_arg = true;
 
-                    for (int x=0; x < number_pipes.size(); ++x) {
+                    for (int x=0; x < me->number_pipes.size(); ++x) {
                         // Same number means that using the same pipe
-                        if (number_pipes[x].number == command.number) {
-                            number_pipes.push_back(NumberPipe{
-                                in:     number_pipes[x].in,
-                                out:    number_pipes[x].out,
+                        if (me->number_pipes[x].number == command.number) {
+                            me->number_pipes.push_back(NumberPipe{
+                                in:     me->number_pipes[x].in,
+                                out:    me->number_pipes[x].out,
                                 number: command.number
                             });
                             is_add = true;
@@ -476,7 +451,7 @@ int main_executor(user_space::UserInfo *me, Command &command) {
                     // No match, Create a new pipe
                     if (!is_add) {
                         pipe(pipefd);
-                        number_pipes.push_back(NumberPipe{
+                        me->number_pipes.push_back(NumberPipe{
                             in: pipefd[0],
                             out: pipefd[1],
                             number: command.number});
@@ -498,7 +473,7 @@ int main_executor(user_space::UserInfo *me, Command &command) {
         if (!is_error_pipe && !is_number_pipe && !is_output_user_pipe) {
             if(!is_final_cmd && command.cmds.size() > 1) {
                 pipe(pipefd);
-                pipes.push_back(Pipe{in: pipefd[0], out: pipefd[1]});
+                me->pipes.push_back(Pipe{in: pipefd[0], out: pipefd[1]});
                 #if 0
                 debug_pipes();
                 #endif
@@ -533,18 +508,18 @@ int main_executor(user_space::UserInfo *me, Command &command) {
             // Normal Pipe
             if (i != 0) {
                 // cout << "Parent Close pipe: " << i-1 << endl;
-                close(pipes[i-1].in);
-                close(pipes[i-1].out);
+                close(me->pipes[i-1].in);
+                close(me->pipes[i-1].out);
             }
 
             // Number Pipe
-            for (int x=0; x < number_pipes.size(); ++x) {
-                if (number_pipes[x].number == 0) {
+            for (int x=0; x < me->number_pipes.size(); ++x) {
+                if (me->number_pipes[x].number == 0) {
                     #if 0
                     cout << "Parent Close number pipe: " << x << endl;
                     #endif
-                    close(number_pipes[x].in);
-                    close(number_pipes[x].out);
+                    close(me->number_pipes[x].in);
+                    close(me->number_pipes[x].out);
                 }
             }
 
@@ -585,9 +560,9 @@ int main_executor(user_space::UserInfo *me, Command &command) {
             /* Duplicate pipe */ 
             if (is_first_cmd) {
                 // Receive input from number pipe
-                for (size_t x = 0; x < number_pipes.size(); x++) {
-                    if (number_pipes[x].number == 0) {
-                        dup2(number_pipes[x].in, STDIN_FILENO);
+                for (size_t x = 0; x < me->number_pipes.size(); x++) {
+                    if (me->number_pipes[x].number == 0) {
+                        dup2(me->number_pipes[x].in, STDIN_FILENO);
                         #if 0
                         cerr << "First Number Pipe (in) " << number_pipes[x].in << " to " << STDIN_FILENO << endl;
                         #endif
@@ -596,8 +571,8 @@ int main_executor(user_space::UserInfo *me, Command &command) {
                 }
 
                 // Setup output of normal pipe
-                if (pipes.size() > 0) {
-                    dup2(pipes[i].out, STDOUT_FILENO);
+                if (me->pipes.size() > 0) {
+                    dup2(me->pipes[i].out, STDOUT_FILENO);
                     #if 0
                     cout << "First Normal Pipe (out) " << pipes[i].out << " to " << STDOUT_FILENO << endl;
                     #endif
@@ -624,9 +599,9 @@ int main_executor(user_space::UserInfo *me, Command &command) {
 
             // Setup input and output of normal pipe
             if (!is_first_cmd && !is_final_cmd) {
-                if (pipes.size() > 0) {
-                    dup2(pipes[i-1].in, STDIN_FILENO);
-                    dup2(pipes[i].out, STDOUT_FILENO);
+                if (me->pipes.size() > 0) {
+                    dup2(me->pipes[i-1].in, STDIN_FILENO);
+                    dup2(me->pipes[i].out, STDOUT_FILENO);
                 }
                 #if 0
                 cout << "Internal (in) " << pipes[i-1].in << " to " << STDIN_FILENO << endl;
@@ -641,19 +616,19 @@ int main_executor(user_space::UserInfo *me, Command &command) {
                     cerr << "Final Number Pipe" << endl;
                     
                     // Setup Input
-                    if (pipes.size() > 0) {
+                    if (me->pipes.size() > 0) {
                         // Receive from previous command via normal pipe
-                        dup2(pipes[i-1].in, STDIN_FILENO);
+                        dup2(me->pipes[i-1].in, STDIN_FILENO);
                         #if 0
                         cerr << "Final number Pipe (in) (from normal pip) " << pipes[i-1].in << " to " <<STDIN_FILENO << endl;
                         #endif
                     }
                     
                     // Setup Output
-                    for (size_t x = 0; x < number_pipes.size(); x++) {
-                        if (number_pipes[x].number == command.number) {
-                            dup2(number_pipes[x].out, STDOUT_FILENO);
-                            close(number_pipes[x].out);
+                    for (size_t x = 0; x < me->number_pipes.size(); x++) {
+                        if (me->number_pipes[x].number == command.number) {
+                            dup2(me->number_pipes[x].out, STDOUT_FILENO);
+                            close(me->number_pipes[x].out);
                             #if 0
                             cerr << "Final Number Pipe (out) " << number_pipes[x].out << " to " << STDOUT_FILENO << endl;
                             #endif
@@ -663,19 +638,19 @@ int main_executor(user_space::UserInfo *me, Command &command) {
                 } else if (is_error_pipe) {
                     cerr << "Final Error Pipe" << endl;
                     /* Error Pipe */
-                    for (size_t x = 0; x < number_pipes.size(); x++) {
-                        if (number_pipes[x].number == command.number) {
-                            dup2(number_pipes[x].out, STDOUT_FILENO);
-                            dup2(number_pipes[x].out, STDERR_FILENO);
+                    for (size_t x = 0; x < me->number_pipes.size(); x++) {
+                        if (me->number_pipes[x].number == command.number) {
+                            dup2(me->number_pipes[x].out, STDOUT_FILENO);
+                            dup2(me->number_pipes[x].out, STDERR_FILENO);
                             break;
                         }
                     }
                 } else if (is_output_user_pipe) {
                     cerr << "Final User Pipe" << endl;
 
-                    if (pipes.size() > 0) {
+                    if (me->pipes.size() > 0) {
                         // Set input
-                        dup2(pipes[i-1].in, STDIN_FILENO);
+                        dup2(me->pipes[i-1].in, STDIN_FILENO);
                     }
 
                     // Set output
@@ -690,8 +665,8 @@ int main_executor(user_space::UserInfo *me, Command &command) {
                 } else {
                     cerr << "Final Normal Pipe" << endl;
                     /* Normal Pipe*/
-                    if (pipes.size() > 0) {
-                        dup2(pipes[i-1].in, STDIN_FILENO);
+                    if (me->pipes.size() > 0) {
+                        dup2(me->pipes[i-1].in, STDIN_FILENO);
                         #if 0
                         cerr << "Set input from " << pipes[i-1].in << " to stdin" << endl;
                         #endif
@@ -706,13 +681,13 @@ int main_executor(user_space::UserInfo *me, Command &command) {
             }
 
             /* Close pipe */
-            for (int ci = 0; ci < pipes.size(); ci++) {
-                close(pipes[ci].in);
-                close(pipes[ci].out);
+            for (int ci = 0; ci < me->pipes.size(); ci++) {
+                close(me->pipes[ci].in);
+                close(me->pipes[ci].out);
             }
-            for (int ci = 0; ci < number_pipes.size(); ci++) {
-                close(number_pipes[ci].in);
-                close(number_pipes[ci].out);
+            for (int ci = 0; ci < me->number_pipes.size(); ci++) {
+                close(me->number_pipes[ci].in);
+                close(me->number_pipes[ci].out);
             }
             for (int x=0; x < user_pipes.size(); ++x) {
                 close(user_pipes[x].pipe.in);
@@ -722,7 +697,7 @@ int main_executor(user_space::UserInfo *me, Command &command) {
             execute_command(me, args);
         }
     }
-    pipes.clear();
+    me->pipes.clear();
     return 0;
 }
 
