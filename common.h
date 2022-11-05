@@ -75,16 +75,6 @@ namespace user_space {
             this->env = {{"PATH", "bin:."}};
         }
 
-        /* Static methods */
-        static UserInfo *create_user(int sock, sockaddr_in addr) {
-            // TODO: UID range 1~30
-            static string default_name = string("(no name)");
-            UserInfo *user = new UserInfo(UID, sock, default_name, addr);
-            ++UID;
-
-            return user; 
-        }
-
         /* Member methods */
         int get_id()         { return this->id;  }
         int get_sockfd()     { return this->sock;  }

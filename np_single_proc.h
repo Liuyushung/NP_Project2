@@ -127,6 +127,21 @@ int create_user_pipe(user_space::UserInfo *me, int dst_uid) {
     return user_pipes.size()-1;
 }
 
+void handle_user_pipe(user_space::UserInfo *me, string cmd, bool *in, bool *out, bool *in_err, bool *out_err, int *in_idx, int *out_idx) {
+    smatch result;
+
+    *in  = regex_search(cmd, result, up_in_pattern);
+    *out = regex_search(cmd, result, up_out_pattern);
+
+    if (*in) {
+        *in_err = handle_input_user_pipe(me, cmd, in_idx);
+    }
+
+    if (*out) {
+        *out_err = handle_output_user_pipe(me, cmd, out_idx);
+    }
+}
+
 void check_user_pipe(string cmd, bool *in, bool *out) {
     smatch result;
 
@@ -410,7 +425,11 @@ int main_executor(user_space::UserInfo *me, Command &command) {
         if (i == command.cmds.size() - 1)  is_final_cmd = true;
 
         // Check if there are user pipes
-        check_user_pipe(command.cmds[i], &is_input_user_pipe, &is_output_user_pipe);
+        // check_user_pipe(command.cmds[i], &is_input_user_pipe, &is_output_user_pipe);
+        handle_user_pipe(me, command.cmds[i],
+            &is_input_user_pipe, &is_output_user_pipe,
+            &is_input_user_pipe_error, &is_output_user_pipe_error,
+            &input_user_pipe_idx, &output_user_pipe_idx);
 
         /* Parse Command to Args */
         #if 0
@@ -422,15 +441,14 @@ int main_executor(user_space::UserInfo *me, Command &command) {
 
             if (is_white_char(arg)) continue;
 
-            // TODO: show message ordering
             if (regex_search(arg, in_result, up_in_pattern)) {
                 ignore_arg = true;
-                is_input_user_pipe_error = handle_input_user_pipe(me, arg, &input_user_pipe_idx);
+                // is_input_user_pipe_error = handle_input_user_pipe(me, arg, &input_user_pipe_idx);
             }
 
             if (regex_search(arg, out_result, up_out_pattern)) {
                 ignore_arg = true;
-                is_output_user_pipe_error = handle_output_user_pipe(me, arg, &output_user_pipe_idx);
+                // is_output_user_pipe_error = handle_output_user_pipe(me, arg, &output_user_pipe_idx);
                 #if 0
                 debug_user_pipes();
                 #endif

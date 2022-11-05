@@ -538,7 +538,6 @@ void parse_command(string input) {
     lines = parse_number_pipe(input);
 
     for (size_t i = 0; i < lines.size(); i++) {
-        // cout << "CMD " << i << ": " << lines[i].cmd << "X" << endl;
         main_executor(lines[i]);
     }
 }
