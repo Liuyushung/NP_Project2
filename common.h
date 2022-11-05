@@ -266,6 +266,7 @@ void welcome(user_space::UserInfo *me) {
 }
 
 string read_msg(int sockfd) {
+    static int cmd_counter = 0;
     char buf[MAX_BUF_SIZE];
     bzero(buf, MAX_BUF_SIZE);
 
@@ -275,7 +276,8 @@ string read_msg(int sockfd) {
     msg.erase(remove(msg.begin(), msg.end(), '\n'), msg.end());
     msg.erase(remove(msg.begin(), msg.end(), '\r'), msg.end());
     #if 1
-    printf("Recv (%ld): %s\n", msg.length(), msg.c_str());
+    ++cmd_counter;
+    printf("(%d) Recv (%ld): %s\n", cmd_counter, msg.length(), msg.c_str());
     #endif
 
     return msg;

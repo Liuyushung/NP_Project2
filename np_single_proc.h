@@ -37,14 +37,18 @@ regex up_in_pattern("[<][1-9]\\d?\\d?\\d?[0]?");
 regex up_out_pattern("[>][1-9]\\d?\\d?\\d?[0]?");
 string original_command;
 
+bool fd_is_valid(int fd) {
+    return fcntl(fd, F_GETFD) != -1 || errno != EBADF;
+}
+
 void debug_number_pipes(vector<NumberPipe> number_pipes) {
     if (number_pipes.size() > 0) {    
         cerr << "Number Pipes" << endl;
         for (size_t i = 0; i < number_pipes.size(); i++) {
             cerr << "\tIndex: "  << i 
                  << "\tNumber: " << number_pipes[i].number
-                 << "\tIn: "     << number_pipes[i].in
-                 << "\tOut: "    << number_pipes[i].out << endl;
+                 << "\tIn: "     << number_pipes[i].in << "\tValid: " << (fd_is_valid(number_pipes[i].in) ? "True" : "False")
+                 << "\tOut: "    << number_pipes[i].out << "\tValid: " << (fd_is_valid(number_pipes[i].out) ? "True" : "False") << endl;
         }
     }
 }
@@ -54,7 +58,7 @@ void debug_pipes(vector<Pipe> pipes) {
         cerr << "Pipes" << endl;
         for (size_t i = 0; i < pipes.size(); i++) {
             cerr << "\tIndex: " << i 
-                 << "\tIn: "    << pipes[i].in
+                 << "\tIn: "    << pipes[i].in 
                  << "\tOut: "   << pipes[i].out << endl;
         }
     }
@@ -317,10 +321,10 @@ vector<Command> parse_number_pipe(string input) {
     // Debug
     #if 0
     for (size_t i = 0; i < lines.size(); i++) {
-        cout << "Line " << i << ": " << lines[i].cmd << endl;
-        cout << "\tCommand: " << lines[i].cmd << endl;
-        cout << "\tCommand Size: " << lines[i].cmds.size() << endl;
-        cout << "\tNumber: " << lines[i].number << endl;
+        cerr << "Line " << i << ": " << lines[i].cmd << endl;
+        cerr << "\tCommand: " << lines[i].cmd << endl;
+        cerr << "\tCommand Size: " << lines[i].cmds.size() << endl;
+        cerr << "\tNumber: " << lines[i].number << endl;
     }
     #endif
         
@@ -382,7 +386,7 @@ int main_executor(user_space::UserInfo *me, Command &command) {
         }
     }
     #if 0
-    cout << "Handle " << command.cmd << endl;
+    cerr << "Handle " << command.cmd << endl;
     #endif
 
     vector<string> args;
@@ -410,6 +414,10 @@ int main_executor(user_space::UserInfo *me, Command &command) {
         check_user_pipe(command.cmds[i], &is_input_user_pipe, &is_output_user_pipe);
 
         /* Parse Command to Args */
+        #if 0
+        cerr << "*** Parse Command: " << command.cmds[i] << endl;
+        #endif
+
         while (getline(iss, arg, ' ')) {
             bool ignore_arg = false;
 
@@ -457,7 +465,7 @@ int main_executor(user_space::UserInfo *me, Command &command) {
                             number: command.number});
                     }
                     #if 0
-                    debug_number_pipes();
+                    debug_number_pipes(me->number_pipes);
                     #endif
                 }
             }
@@ -475,7 +483,7 @@ int main_executor(user_space::UserInfo *me, Command &command) {
                 pipe(pipefd);
                 me->pipes.push_back(Pipe{in: pipefd[0], out: pipefd[1]});
                 #if 0
-                debug_pipes();
+                debug_pipes(me->pipes);
                 #endif
             }
         }
@@ -491,7 +499,7 @@ int main_executor(user_space::UserInfo *me, Command &command) {
              << "\tout:" << output_user_pipe_idx << endl;
         #endif
 
-        // cout << "Start Fork" << endl;
+        // cerr << "Start Fork" << endl;
         do {
             pid = fork();
             usleep(5000);
@@ -500,14 +508,14 @@ int main_executor(user_space::UserInfo *me, Command &command) {
         if (pid > 0) {
             /* Parent Process */
             #if 0
-                cout << "Parent PID: " << getpid() << endl;
-                cout << "\tNumber of Pipes: " << pipes.size() << endl;
-                cout << "\tNumber of N Pipes: " << number_pipes.size() << endl;
+                cerr << "Parent PID: " << getpid() << endl;
+                cerr << "\tNumber of Pipes: " << pipes.size() << endl;
+                cerr << "\tNumber of N Pipes: " << number_pipes.size() << endl;
             #endif
             /* Close Pipe */
             // Normal Pipe
             if (i != 0) {
-                // cout << "Parent Close pipe: " << i-1 << endl;
+                // cerr << "Parent Close pipe: " << i-1 << endl;
                 close(me->pipes[i-1].in);
                 close(me->pipes[i-1].out);
             }
@@ -516,10 +524,14 @@ int main_executor(user_space::UserInfo *me, Command &command) {
             for (int x=0; x < me->number_pipes.size(); ++x) {
                 if (me->number_pipes[x].number == 0) {
                     #if 0
-                    cout << "Parent Close number pipe: " << x << endl;
+                    cerr << "Parent Close number pipe: " << x << endl;
                     #endif
                     close(me->number_pipes[x].in);
                     close(me->number_pipes[x].out);
+
+                    // Remove number pipe
+                    me->number_pipes.erase(me->number_pipes.begin() + x);
+                    --x;
                 }
             }
 
@@ -534,23 +546,23 @@ int main_executor(user_space::UserInfo *me, Command &command) {
             if (is_final_cmd && !(is_number_pipe || is_error_pipe) && !is_output_user_pipe) {
                 // Final process, wait
                 #if 0
-                cout << "Parent Wait Start" << endl;
+                cerr << "Parent Wait Start" << endl;
                 #endif
                 int st;
                 waitpid(pid, &st, 0);
                 #if 0
-                cout << "Parent Wait End: " << st << endl;
+                cerr << "Parent Wait End: " << st << endl;
                 #endif
             }
         } else {
             /* Child Process */
             #if 0
             usleep(2000);
-            cout << "Child PID: " << getpid() << endl;
-            cout << "\tFirst? " << (is_first_cmd ? "True" : "False") << endl;
-            cout << "\tFinal? " << (is_final_cmd ? "True" : "False") << endl;
-            cout << "\tNumber? " << (is_number_pipe ? "True" : "False") << endl;
-            cout << "\tError? " << (is_error_pipe ? "True" : "False") << endl;
+            cerr << "Child PID: " << getpid() << endl;
+            cerr << "\tFirst? " << (is_first_cmd ? "True" : "False") << endl;
+            cerr << "\tFinal? " << (is_final_cmd ? "True" : "False") << endl;
+            cerr << "\tNumber? " << (is_number_pipe ? "True" : "False") << endl;
+            cerr << "\tError? " << (is_error_pipe ? "True" : "False") << endl;
             #endif
             #if 0
             cerr << "Child Execute: " << args[0] << endl;
@@ -564,7 +576,7 @@ int main_executor(user_space::UserInfo *me, Command &command) {
                     if (me->number_pipes[x].number == 0) {
                         dup2(me->number_pipes[x].in, STDIN_FILENO);
                         #if 0
-                        cerr << "First Number Pipe (in) " << number_pipes[x].in << " to " << STDIN_FILENO << endl;
+                        cerr << "First Number Pipe (in) " << me->number_pipes[x].in << " to stdin" << endl;
                         #endif
                         break;
                     }
@@ -574,7 +586,7 @@ int main_executor(user_space::UserInfo *me, Command &command) {
                 if (me->pipes.size() > 0) {
                     dup2(me->pipes[i].out, STDOUT_FILENO);
                     #if 0
-                    cout << "First Normal Pipe (out) " << pipes[i].out << " to " << STDOUT_FILENO << endl;
+                    cerr << "First Normal Pipe (out) " << me->pipes[i].out << " to stdout" << endl;
                     #endif
                 }
 
@@ -604,8 +616,8 @@ int main_executor(user_space::UserInfo *me, Command &command) {
                     dup2(me->pipes[i].out, STDOUT_FILENO);
                 }
                 #if 0
-                cout << "Internal (in) " << pipes[i-1].in << " to " << STDIN_FILENO << endl;
-                cout << "Internal (out) " << pipes[i].out << " to " << STDOUT_FILENO << endl;
+                cerr << "Internal (in) " << me->pipes[i-1].in << " to stdin"  << endl;
+                cerr << "Internal (out) " << me->pipes[i].out << " to stdout" << endl;
                 #endif
                 // TODO: user pipe in the middle ??
             }
@@ -620,7 +632,7 @@ int main_executor(user_space::UserInfo *me, Command &command) {
                         // Receive from previous command via normal pipe
                         dup2(me->pipes[i-1].in, STDIN_FILENO);
                         #if 0
-                        cerr << "Final number Pipe (in) (from normal pip) " << pipes[i-1].in << " to " <<STDIN_FILENO << endl;
+                        cerr << "Final number Pipe (in) (from normal pip) " << me->pipes[i-1].in << " to stdin" << endl;
                         #endif
                     }
                     
@@ -630,7 +642,7 @@ int main_executor(user_space::UserInfo *me, Command &command) {
                             dup2(me->number_pipes[x].out, STDOUT_FILENO);
                             close(me->number_pipes[x].out);
                             #if 0
-                            cerr << "Final Number Pipe (out) " << number_pipes[x].out << " to " << STDOUT_FILENO << endl;
+                            cerr << "Final Number Pipe (out) " << me->number_pipes[x].out << " to stdout" << endl;
                             #endif
                             break;
                         }
@@ -668,14 +680,13 @@ int main_executor(user_space::UserInfo *me, Command &command) {
                     if (me->pipes.size() > 0) {
                         dup2(me->pipes[i-1].in, STDIN_FILENO);
                         #if 0
-                        cerr << "Set input from " << pipes[i-1].in << " to stdin" << endl;
+                        cerr << "Set input from " << me->pipes[i-1].in << " to stdin" << endl;
                         #endif
                     }
-                    
                     // Redirect to socket
                     dup2(me->get_sockfd(), STDOUT_FILENO);
                     #if 0
-                    cerr << "Set output to " << me->get_sockfd() << endl;
+                    cerr << "Set output to socket " << me->get_sockfd() << endl;
                     #endif
                 }
             }
@@ -708,7 +719,6 @@ int handle_command(user_space::UserInfo *me, string input) {
     lines = parse_number_pipe(input);
 
     for (size_t i = 0; i < lines.size(); i++) {
-        // cout << "CMD " << i << ": " << lines[i].cmd << "X" << endl;
         code = main_executor(me, lines[i]);
     }
 
@@ -716,6 +726,9 @@ int handle_command(user_space::UserInfo *me, string input) {
 }
 
 int run_shell(user_space::UserInfo *me, string input) {
+    if (input.size() == 0) {
+        return 0;
+    }
     // Load user config
     load_user_config(me);
 

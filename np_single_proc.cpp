@@ -68,8 +68,9 @@ int main(int argc,char const *argv[]) {
                 login_prompt(client);
                 command_prompt(client);
 
-                #if 0
-                user_table.show_table();
+                #if 1
+                // user_table.show_table();
+                cout << "Online users: " << user_table.table.size() << endl;
                 #endif
             }
         }
