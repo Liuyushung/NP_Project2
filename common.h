@@ -154,9 +154,22 @@ namespace user_space {
             this->del_queue.push_back(id);
         }
 
-        void del_process() {
-            for (auto idx: this->del_queue) {
-                this->table.erase(idx);
+        void del_process(vector<UserPipe> &user_pipes) {
+            for (auto uid: this->del_queue) {
+                #if 0
+                cerr << "Delete Process: uid = " << uid << endl;
+                #endif
+
+                // Clean unread message
+                for (int x=0; x < user_pipes.size(); ++x) {
+                    if (uid == user_pipes[x].dst_uid) {
+                        user_pipes.erase(user_pipes.begin() + x);
+                        --x;
+                    }
+                }
+                // Delete user
+                delete this->table[uid];
+                this->table.erase(uid);
             }
             this->del_queue.clear();
         }
