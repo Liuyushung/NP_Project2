@@ -358,7 +358,7 @@ void execute_command(user_space::UserInfo *me, vector<string> args) {
     const char *prog = args[0].c_str();
     const char **c_args = new const char* [args.size()+1];  // Reserve one location for NULL
 
-    #if 1
+    #if 0
     cerr << "Execute Command Args: ";
     for (size_t i = 0; i < args.size(); i++) {
         cerr << args[i] << " ";
@@ -449,7 +449,7 @@ int main_executor(user_space::UserInfo *me, Command &command) {
             if (regex_search(arg, out_result, up_out_pattern)) {
                 ignore_arg = true;
                 is_output_user_pipe_error = handle_output_user_pipe(me, arg, &output_user_pipe_idx);
-                #if 1
+                #if 0
                 debug_user_pipes();
                 #endif
             }
@@ -499,13 +499,13 @@ int main_executor(user_space::UserInfo *me, Command &command) {
             if(!is_final_cmd && command.cmds.size() > 1) {
                 pipe(pipefd);
                 pipes.push_back(Pipe{in: pipefd[0], out: pipefd[1]});
-                #if 1
+                #if 0
                 debug_pipes();
                 #endif
             }
         }
 
-        #if 1
+        #if 0
         cerr << "User Pipe Flag:" << endl;
         cerr << "\tin: "      << (is_input_user_pipe ? "True" : "False") << endl
              << "\tout: "     << (is_output_user_pipe ? "True" : "False") << endl
@@ -558,18 +558,18 @@ int main_executor(user_space::UserInfo *me, Command &command) {
 
             if (is_final_cmd && !(is_number_pipe || is_error_pipe) && !is_output_user_pipe) {
                 // Final process, wait
-                #if 1
+                #if 0
                 cout << "Parent Wait Start" << endl;
                 #endif
                 int st;
                 waitpid(pid, &st, 0);
-                #if 1
+                #if 0
                 cout << "Parent Wait End: " << st << endl;
                 #endif
             }
         } else {
             /* Child Process */
-            #if 1
+            #if 0
             usleep(2000);
             cout << "Child PID: " << getpid() << endl;
             cout << "\tFirst? " << (is_first_cmd ? "True" : "False") << endl;
@@ -609,12 +609,12 @@ int main_executor(user_space::UserInfo *me, Command &command) {
                         int dev_null = open("/dev/null", O_RDWR);
                         dup2(dev_null, STDIN_FILENO);
                         close(dev_null);
-                        #if 1
+                        #if 0
                         cerr << "Set up user pipe input to null" << endl;
                         #endif
                     } else {
                         dup2(user_pipes[input_user_pipe_idx].pipe.in, STDIN_FILENO);
-                        #if 1
+                        #if 0
                         cerr << "Set up user pipe input to " << user_pipes[input_user_pipe_idx].pipe.in << endl;
                         #endif
                     }
@@ -692,14 +692,14 @@ int main_executor(user_space::UserInfo *me, Command &command) {
                     /* Normal Pipe*/
                     if (pipes.size() > 0) {
                         dup2(pipes[i-1].in, STDIN_FILENO);
-                        #if 1
+                        #if 0
                         cerr << "Set input from " << pipes[i-1].in << " to stdin" << endl;
                         #endif
                     }
                     
                     // Redirect to socket
                     dup2(me->get_sockfd(), STDOUT_FILENO);
-                    #if 1
+                    #if 0
                     cerr << "Set output to " << me->get_sockfd() << endl;
                     #endif
                 }

@@ -24,6 +24,7 @@ using namespace std;
 #define BUILT_IN_EXIT   99
 #define BUILT_IN_TRUE   1
 #define BUILT_IN_FALSE  0
+#define USER_LIMIT      30
 
 namespace user_space {
     class UserInfo {
@@ -85,9 +86,28 @@ namespace user_space {
     class UserTable {
     public:
         map<int, UserInfo *> table; // uid: user
+        vector<int> del_queue;
 
         UserTable() {
             this->table = {};
+        }
+
+        int create_user(int sock, sockaddr_in addr) {
+            static string default_name = string("(no name)");
+            int uid = -1;
+
+            if (this->table.size() <= USER_LIMIT) {
+                for (int x = 1; x <= USER_LIMIT; x++) {
+                    if (!this->has_user(x)) {
+                        UserInfo *user = new UserInfo(x, sock, default_name, addr);
+                        this->add_user(user);
+                        uid = x;
+                        break;
+                    }
+                }
+            }
+
+            return uid;
         }
 
         void add_user(UserInfo *user) {
@@ -96,13 +116,20 @@ namespace user_space {
             this->table.insert(p);
         }
 
-        void del_user(int id) {
-            this->table.erase(id);
-        }
-
         bool has_user(int id) {
             map<int, UserInfo *>::iterator iter = this->table.find(id);
             return (iter != this->table.end());
+        }
+
+        void put_user_to_del_queue(int id) {
+            this->del_queue.push_back(id);
+        }
+
+        void del_process() {
+            for (auto idx: this->del_queue) {
+                this->table.erase(idx);
+            }
+            this->del_queue.clear();
         }
 
         UserInfo *get_user_by_id(int id) {
@@ -261,7 +288,7 @@ void my_printenv(user_space::UserInfo *me, string var) {
 }
 
 void my_exit(user_space::UserInfo *me) {
-    user_space::user_table.del_user(me->get_id());
+    user_space::user_table.put_user_to_del_queue(me->get_id());
     logout_prompt(me);
     close(me->get_sockfd());
 }
@@ -446,7 +473,7 @@ int get_listen_socket(const char *port) {
     }
 
     // Listen socket
-    status_code = listen(listen_sock, 128);
+    status_code = listen(listen_sock, USER_LIMIT);
     if (status_code < 0) {
         perror("Server listen");
         exit(0);
