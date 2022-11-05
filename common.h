@@ -504,7 +504,7 @@ int get_listen_socket(const char *port) {
     }
 
     // Listen socket
-    status_code = listen(listen_sock, USER_LIMIT);
+    status_code = listen(listen_sock, 5);
     if (status_code < 0) {
         perror("Server listen");
         exit(0);

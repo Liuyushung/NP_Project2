@@ -17,16 +17,16 @@ void interrupt_handler(int sig) {
 }
 
 int main(int argc,char const *argv[]) {
-    if (argc != 2) {
-        cout << "Usage: prog port" << endl;
-        exit(0);
-    }
+    // if (argc != 2) {
+    //     cout << "Usage: prog port" << endl;
+    //     exit(0);
+    // }
     signal(SIGINT, interrupt_handler);
 
     struct sockaddr_in c_addr;
     int client_sock, c_addr_len;
     int status_code;
-    int nfds = USER_LIMIT;
+    int nfds;
     fd_set afds, rfds;
 
     // Initilize variables
@@ -34,8 +34,9 @@ int main(int argc,char const *argv[]) {
     c_addr_len = sizeof(c_addr);
     FD_ZERO(&afds);
 
-    listen_sock = get_listen_socket(argv[1]);
-    // listen_sock = get_listen_socket("12345");
+    // listen_sock = get_listen_socket(argv[1]);
+    listen_sock = get_listen_socket("12345");
+    nfds = listen_sock;
 
     FD_SET(listen_sock, &afds);
     // Initilize variables done
@@ -44,7 +45,7 @@ int main(int argc,char const *argv[]) {
     while (1) {
         memcpy(&rfds, &afds, sizeof(rfds));
 
-        if (select(nfds, &rfds, (fd_set *)0, (fd_set *)0, (struct timeval *)0) < 0) {
+        if (select(nfds+1, &rfds, (fd_set *)0, (fd_set *)0, (struct timeval *)0) < 0) {
             perror("select error");
             exit(0);
         }
@@ -60,6 +61,7 @@ int main(int argc,char const *argv[]) {
 
             if (uid < 0) {
                 cerr << "Online users are up to limit (" << USER_LIMIT << ")" << endl;
+                close(client_sock);
             } else {
                 FD_SET(client_sock, &afds);
                 UserInfo *client = user_table.get_user_by_id(uid);
@@ -67,6 +69,10 @@ int main(int argc,char const *argv[]) {
                 welcome(client);
                 login_prompt(client);
                 command_prompt(client);
+
+                if (nfds < client_sock) {
+                    nfds = client_sock;
+                }
 
                 #if 1
                 // user_table.show_table();
