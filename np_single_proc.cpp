@@ -92,6 +92,9 @@ int main(int argc,char const *argv[]) {
         // Clean the exit users
         if (user_table.del_queue.size() > 0) {
             user_table.del_process();
+            #if 1
+            cout << "Online users: " << user_table.table.size() << endl;
+            #endif
         }
     }
     

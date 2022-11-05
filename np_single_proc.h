@@ -1,6 +1,5 @@
 #ifndef NP_SINGLE_PROC
 #define NP_SINGLE_PROC
-#include <vector>
 #include <regex>
 #include <fcntl.h>
 #include <stdio.h>
@@ -569,7 +568,10 @@ int main_executor(user_space::UserInfo *me, Command &command) {
             usleep(5000);
             #endif
 
-            /* Duplicate pipe */ 
+            /* Duplicate pipe */
+            // STDERR -> socket
+            dup2(me->get_sockfd(), STDERR_FILENO);
+
             if (is_first_cmd) {
                 // Receive input from number pipe
                 for (size_t x = 0; x < me->number_pipes.size(); x++) {
@@ -625,7 +627,9 @@ int main_executor(user_space::UserInfo *me, Command &command) {
             if (is_final_cmd) {
                 if (is_number_pipe) {
                     /* Number Pipe */
+                    #if 0
                     cerr << "Final Number Pipe" << endl;
+                    #endif
                     
                     // Setup Input
                     if (me->pipes.size() > 0) {
@@ -648,7 +652,9 @@ int main_executor(user_space::UserInfo *me, Command &command) {
                         }
                     }
                 } else if (is_error_pipe) {
+                    #if 0
                     cerr << "Final Error Pipe" << endl;
+                    #endif
                     /* Error Pipe */
                     for (size_t x = 0; x < me->number_pipes.size(); x++) {
                         if (me->number_pipes[x].number == command.number) {
@@ -658,7 +664,9 @@ int main_executor(user_space::UserInfo *me, Command &command) {
                         }
                     }
                 } else if (is_output_user_pipe) {
+                    #if 0
                     cerr << "Final User Pipe" << endl;
+                    #endif
 
                     if (me->pipes.size() > 0) {
                         // Set input
@@ -675,7 +683,9 @@ int main_executor(user_space::UserInfo *me, Command &command) {
                     }
 
                 } else {
+                    #if 0
                     cerr << "Final Normal Pipe" << endl;
+                    #endif
                     /* Normal Pipe*/
                     if (me->pipes.size() > 0) {
                         dup2(me->pipes[i-1].in, STDIN_FILENO);
@@ -683,6 +693,7 @@ int main_executor(user_space::UserInfo *me, Command &command) {
                         cerr << "Set input from " << me->pipes[i-1].in << " to stdin" << endl;
                         #endif
                     }
+
                     // Redirect to socket
                     dup2(me->get_sockfd(), STDOUT_FILENO);
                     #if 0
