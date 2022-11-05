@@ -15,12 +15,11 @@ int main(int argc,char const *argv[]) {
 
     struct sockaddr_in c_addr;
     int listen_sock, client_sock, c_addr_len;
-    int status_code, optval = 1;
+    int status_code;
 
     bzero((char *)&c_addr, sizeof(c_addr));
 
     listen_sock = get_listen_socket(argv[1]);
-    setsockopt(listen_sock, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int));
     
     signal(SIGCHLD, child_handler);
 

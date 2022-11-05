@@ -430,6 +430,14 @@ int get_listen_socket(const char *port) {
         exit(0);
     }
 
+    // Socket setting
+    int optval = 1;
+    status_code = setsockopt(listen_sock, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int));
+    if (status_code < 0) {
+        perror("Set socket option");
+        exit(0);
+    }
+
     // Bind socket
     status_code = bind(listen_sock, (struct sockaddr *) &s_addr, sizeof(s_addr));
     if (status_code < 0) {

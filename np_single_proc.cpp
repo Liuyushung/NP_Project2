@@ -27,21 +27,16 @@ int main(int argc,char const *argv[]) {
 
     struct sockaddr_in c_addr;
     int client_sock, c_addr_len;
-    int status_code, optval;
+    int status_code;
     int nfds = USER_LIMIT;
     fd_set afds, rfds;
 
     // Initilize variables
     bzero((char *)&c_addr, sizeof(c_addr));
     c_addr_len = sizeof(c_addr);
-    optval = 1;
     FD_ZERO(&afds);
 
     listen_sock = get_listen_socket(argv[1]);
-    if (setsockopt(listen_sock, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int)) == -1) {
-        perror("Set socket option");
-        exit(0);
-    }
 
     FD_SET(listen_sock, &afds);
     // Initilize variables done
