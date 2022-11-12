@@ -402,6 +402,15 @@ void sendout_msg(int sockfd, string &msg) {
 }
 /* Network IO End */
 
+bool is_white_char(string cmd) {
+    for (size_t i = 0; i < cmd.length(); i++) {
+        if(isspace(cmd[i]) == 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
 void broadcast(string msg) {
     while (true) {
         pthread_mutex_lock(&msg_mutex);
@@ -713,363 +722,406 @@ int handle_builtin(int uid, string cmd, Context *context) {
 }
 // Built-in Command End
 
-// int main_executor(int uid, Command &command, Context *context) {
-//     /* Pre-Process */
-//     decrement_and_cleanup_number_pipes(me->number_pipes);
-//     if (command.cmds.size() == 1) {
-//         int code = handle_builtin(me, command.cmds[0]);
-//         if (code != BUILT_IN_FALSE) {
-//             return code;
-//         }
-//     }
-//     #if 0
-//     cerr << "Handle " << command.cmd << endl;
-//     #endif
+void execute_command(int uid, vector<string> args) {
+    int fd;
+    bool need_file_redirection = false;
+    const char *prog = args[0].c_str();
+    const char **c_args = new const char* [args.size()+1];  // Reserve one location for NULL
 
-//     vector<string> args;
-//     string error_pipe_symbol = "!", pipe_symbol = "|";
-//     string arg;
-//     bool is_error_pipe = false, is_number_pipe = false;
-//     bool is_input_user_pipe = false, is_output_user_pipe = false;
-//     bool is_input_user_pipe_error = false, is_output_user_pipe_error = false;
+    #if 0
+    cerr << "Execute Command Args: ";
+    for (size_t i = 0; i < args.size(); i++) {
+        cerr << args[i] << " ";
+    }
+    cerr << endl;
+    #endif
+
+    /* Parse Arguments */
+    for (size_t i = 0; i < args.size(); i++) {
+        if (args[i] == ">") {
+            need_file_redirection = true;
+            fd = open(args[i+1].c_str(), O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+            args.pop_back();  // Remove file name
+            args.pop_back();  // Remove redirect symbol
+            break;
+        }
+        c_args[i] = args[i].c_str();
+    }
+    c_args[args.size()] = NULL;
+
+    // Check if need file redirection
+    if (need_file_redirection) {
+        dup2(fd, STDOUT_FILENO);
+        close(fd);
+    }
+
+    // Execute Command
+    if (execvp(prog, (char **)c_args) == -1) {
+        ostringstream oss;
+        string msg;
+
+        oss << "Unknown command: [" << args[0] << "]." << endl;
+        msg = oss.str();
+        sendout_msg(user_shm_ptr[uid-1].sockfd, msg);
+        exit(1);
+    }
+}
+
+int main_executor(int uid, Command &command, Context *context) {
+    /* Pre-Process */
+    decrement_and_cleanup_number_pipes(context->number_pipes);
+    if (command.cmds.size() == 1) {
+        int code = handle_builtin(uid, command.cmds[0], context);
+        if (code != BUILT_IN_FALSE) {
+            return code;
+        }
+    }
+    #if 0
+    cerr << "Handle " << command.cmd << endl;
+    #endif
+
+    vector<string> args;
+    string error_pipe_symbol = "!", pipe_symbol = "|";
+    string arg;
+    bool is_error_pipe = false, is_number_pipe = false;
+    bool is_input_user_pipe = false, is_output_user_pipe = false;
+    bool is_input_user_pipe_error = false, is_output_user_pipe_error = false;
     
-//     // Handle a command per loop
-//     for (size_t i = 0; i < command.cmds.size(); i++) {
-//         istringstream iss(command.cmds[i]);
-//         vector<string> args;
-//         pid_t pid;
-//         int pipefd[2];
-//         int input_user_pipe_idx  = -1;
-//         int output_user_pipe_idx = -1;
-//         bool is_first_cmd = false, is_final_cmd = false;
-//         smatch in_result, out_result;
+    // Handle a command per loop
+    for (size_t i = 0; i < command.cmds.size(); i++) {
+        istringstream iss(command.cmds[i]);
+        vector<string> args;
+        pid_t pid;
+        int pipefd[2];
+        int input_user_pipe_idx  = -1;
+        int output_user_pipe_idx = -1;
+        bool is_first_cmd = false, is_final_cmd = false;
+        smatch in_result, out_result;
 
-//         if (i == 0)                        is_first_cmd = true;
-//         if (i == command.cmds.size() - 1)  is_final_cmd = true;
+        if (i == 0)                        is_first_cmd = true;
+        if (i == command.cmds.size() - 1)  is_final_cmd = true;
 
-//         // Check if there are user pipes
-//         // TODO: user pipe
+        // Check if there are user pipes
+        // TODO: user pipe
 
-//         /* Parse Command to Args */
-//         #if 0
-//         cerr << "*** Parse Command: " << command.cmds[i] << endl;
-//         #endif
+        /* Parse Command to Args */
+        #if 0
+        cerr << "*** Parse Command: " << command.cmds[i] << endl;
+        #endif
 
-//         while (getline(iss, arg, ' ')) {
-//             bool ignore_arg = false;
+        while (getline(iss, arg, ' ')) {
+            bool ignore_arg = false;
 
-//             if (is_white_char(arg)) continue;
+            if (is_white_char(arg)) continue;
 
-//             if (regex_search(arg, in_result, up_in_pattern)) {
-//                 ignore_arg = true;
-//                 // is_input_user_pipe_error = handle_input_user_pipe(me, arg, &input_user_pipe_idx);
-//             }
+            // if (regex_search(arg, in_result, up_in_pattern)) {
+            //     ignore_arg = true;
+            //     is_input_user_pipe_error = handle_input_user_pipe(me, arg, &input_user_pipe_idx);
+            // }
 
-//             if (regex_search(arg, out_result, up_out_pattern)) {
-//                 ignore_arg = true;
-//                 // is_output_user_pipe_error = handle_output_user_pipe(me, arg, &output_user_pipe_idx);
-//                 #if 0
-//                 debug_user_pipes();
-//                 #endif
-//             }
+            // if (regex_search(arg, out_result, up_out_pattern)) {
+            //     ignore_arg = true;
+            //     is_output_user_pipe_error = handle_output_user_pipe(me, arg, &output_user_pipe_idx);
+            //     #if 0
+            //     debug_user_pipes();
+            //     #endif
+            // }
 
-//             // Handle number and error pipe
-//             if (is_final_cmd) {
-//                 if ((is_number_pipe = (arg.find("|") != string::npos)) ||
-//                     (is_error_pipe  = (arg.find("!") != string::npos))) {
-//                     bool is_add = false;
-//                     ignore_arg = true;
+            // Handle number and error pipe
+            if (is_final_cmd) {
+                if ((is_number_pipe = (arg.find("|") != string::npos)) ||
+                    (is_error_pipe  = (arg.find("!") != string::npos))) {
+                    bool is_add = false;
+                    ignore_arg = true;
 
-//                     for (int x=0; x < me->number_pipes.size(); ++x) {
-//                         // Same number means that using the same pipe
-//                         if (me->number_pipes[x].number == command.number) {
-//                             me->number_pipes.push_back(NumberPipe{
-//                                 in:     me->number_pipes[x].in,
-//                                 out:    me->number_pipes[x].out,
-//                                 number: command.number
-//                             });
-//                             is_add = true;
-//                             break;
-//                         }
-//                     }
-//                     // No match, Create a new pipe
-//                     if (!is_add) {
-//                         pipe(pipefd);
-//                         me->number_pipes.push_back(NumberPipe{
-//                             in: pipefd[0],
-//                             out: pipefd[1],
-//                             number: command.number});
-//                     }
-//                     #if 0
-//                     debug_number_pipes(me->number_pipes);
-//                     #endif
-//                 }
-//             }
+                    for (int x=0; x < context->number_pipes.size(); ++x) {
+                        // Same number means that using the same pipe
+                        if (context->number_pipes[x].number == command.number) {
+                            context->number_pipes.push_back(NumberPipe{
+                                in:     context->number_pipes[x].in,
+                                out:    context->number_pipes[x].out,
+                                number: command.number
+                            });
+                            is_add = true;
+                            break;
+                        }
+                    }
+                    // No match, Create a new pipe
+                    if (!is_add) {
+                        pipe(pipefd);
+                        context->number_pipes.push_back(NumberPipe{
+                            in: pipefd[0],
+                            out: pipefd[1],
+                            number: command.number});
+                    }
+                    #if 0
+                    debug_number_pipes(context->number_pipes);
+                    #endif
+                }
+            }
 
-//             // Ignore |N or !N
-//             if (!ignore_arg) {
-//                 args.push_back(arg);
-//             }
-//         }
-//         /* Parse Command to Args End */
+            // Ignore |N or !N
+            if (!ignore_arg) {
+                args.push_back(arg);
+            }
+        }
+        /* Parse Command to Args End */
 
-//         /* Create Normal Pipe */
-//         if (!is_error_pipe && !is_number_pipe && !is_output_user_pipe) {
-//             if(!is_final_cmd && command.cmds.size() > 1) {
-//                 pipe(pipefd);
-//                 me->pipes.push_back(Pipe{in: pipefd[0], out: pipefd[1]});
-//                 #if 0
-//                 debug_pipes(me->pipes);
-//                 #endif
-//             }
-//         }
+        /* Create Normal Pipe */
+        if (!is_error_pipe && !is_number_pipe && !is_output_user_pipe) {
+            if(!is_final_cmd && command.cmds.size() > 1) {
+                pipe(pipefd);
+                context->pipes.push_back(Pipe{in: pipefd[0], out: pipefd[1]});
+                #if 0
+                debug_pipes(context->pipes);
+                #endif
+            }
+        }
 
-//         #if 0
-//         cerr << "User Pipe Flag:" << endl;
-//         cerr << "\tin: "      << (is_input_user_pipe ? "True" : "False") << endl
-//              << "\tout: "     << (is_output_user_pipe ? "True" : "False") << endl
-//              << "\tin err: "  << (is_input_user_pipe_error ? "True" : "False") << endl
-//              << "\tout err: " << (is_output_user_pipe_error ? "True" : "False") << endl;
-//         cerr << "User Pipe index" << endl;
-//         cerr << "\tin: " << input_user_pipe_idx << endl
-//              << "\tout:" << output_user_pipe_idx << endl;
-//         #endif
+        #if 0
+        cerr << "User Pipe Flag:" << endl;
+        cerr << "\tin: "      << (is_input_user_pipe ? "True" : "False") << endl
+             << "\tout: "     << (is_output_user_pipe ? "True" : "False") << endl
+             << "\tin err: "  << (is_input_user_pipe_error ? "True" : "False") << endl
+             << "\tout err: " << (is_output_user_pipe_error ? "True" : "False") << endl;
+        cerr << "User Pipe index" << endl;
+        cerr << "\tin: " << input_user_pipe_idx << endl
+             << "\tout:" << output_user_pipe_idx << endl;
+        #endif
 
-//         // cerr << "Start Fork" << endl;
-//         do {
-//             pid = fork();
-//             usleep(5000);
-//         } while (pid < 0);
+        // cerr << "Start Fork" << endl;
+        do {
+            pid = fork();
+            usleep(5000);
+        } while (pid < 0);
 
-//         if (pid > 0) {
-//             /* Parent Process */
-//             #if 0
-//                 cerr << "Parent PID: " << getpid() << endl;
-//                 cerr << "\tNumber of Pipes: " << pipes.size() << endl;
-//                 cerr << "\tNumber of N Pipes: " << number_pipes.size() << endl;
-//             #endif
-//             /* Close Pipe */
-//             // Normal Pipe
-//             if (i != 0) {
-//                 // cerr << "Parent Close pipe: " << i-1 << endl;
-//                 close(me->pipes[i-1].in);
-//                 close(me->pipes[i-1].out);
-//             }
+        if (pid > 0) {
+            /* Parent Process */
+            #if 0
+                cerr << "Parent PID: " << getpid() << endl;
+                cerr << "\tNumber of Pipes: " << pipes.size() << endl;
+                cerr << "\tNumber of N Pipes: " << number_pipes.size() << endl;
+            #endif
+            /* Close Pipe */
+            // Normal Pipe
+            if (i != 0) {
+                // cerr << "Parent Close pipe: " << i-1 << endl;
+                close(context->pipes[i-1].in);
+                close(context->pipes[i-1].out);
+            }
 
-//             // Number Pipe
-//             for (int x=0; x < me->number_pipes.size(); ++x) {
-//                 if (me->number_pipes[x].number == 0) {
-//                     #if 0
-//                     cerr << "Parent Close number pipe: " << x << endl;
-//                     #endif
-//                     close(me->number_pipes[x].in);
-//                     close(me->number_pipes[x].out);
+            // Number Pipe
+            for (int x=0; x < context->number_pipes.size(); ++x) {
+                if (context->number_pipes[x].number == 0) {
+                    #if 0
+                    cerr << "Parent Close number pipe: " << x << endl;
+                    #endif
+                    close(context->number_pipes[x].in);
+                    close(context->number_pipes[x].out);
 
-//                     // Remove number pipe
-//                     me->number_pipes.erase(me->number_pipes.begin() + x);
-//                     --x;
-//                 }
-//             }
+                    // Remove number pipe
+                    context->number_pipes.erase(context->number_pipes.begin() + x);
+                    --x;
+                }
+            }
 
-//             // User Pipe
-//             if (input_user_pipe_idx != -1) {
-//                 close(user_pipes[input_user_pipe_idx].pipe.in);
-//                 close(user_pipes[input_user_pipe_idx].pipe.out);
-//                 user_pipes[input_user_pipe_idx].is_done = true;
-//                 clean_user_pipe();
-//             }
+            // User Pipe
+            // if (input_user_pipe_idx != -1) {
+            //     close(user_pipes[input_user_pipe_idx].pipe.in);
+            //     close(user_pipes[input_user_pipe_idx].pipe.out);
+            //     user_pipes[input_user_pipe_idx].is_done = true;
+            //     clean_user_pipe();
+            // }
 
-//             if (is_final_cmd && !(is_number_pipe || is_error_pipe) && !is_output_user_pipe) {
-//                 // Final process, wait
-//                 #if 0
-//                 cerr << "Parent Wait Start" << endl;
-//                 #endif
-//                 int st;
-//                 waitpid(pid, &st, 0);
-//                 #if 0
-//                 cerr << "Parent Wait End: " << st << endl;
-//                 #endif
-//             }
-//         } else {
-//             /* Child Process */
-//             #if 0
-//             usleep(2000);
-//             cerr << "Child PID: " << getpid() << endl;
-//             cerr << "\tFirst? " << (is_first_cmd ? "True" : "False") << endl;
-//             cerr << "\tFinal? " << (is_final_cmd ? "True" : "False") << endl;
-//             cerr << "\tNumber? " << (is_number_pipe ? "True" : "False") << endl;
-//             cerr << "\tError? " << (is_error_pipe ? "True" : "False") << endl;
-//             #endif
-//             #if 0
-//             cerr << "Child Execute: " << args[0] << endl;
-//             usleep(5000);
-//             #endif
+            if (is_final_cmd && !(is_number_pipe || is_error_pipe) && !is_output_user_pipe) {
+                // Final process, wait
+                #if 0
+                cerr << "Parent Wait Start" << endl;
+                #endif
+                int st;
+                waitpid(pid, &st, 0);
+                #if 0
+                cerr << "Parent Wait End: " << st << endl;
+                #endif
+            }
+        } else {
+            /* Child Process */
+            #if 0
+            usleep(2000);
+            cerr << "Child PID: " << getpid() << endl;
+            cerr << "\tFirst? " << (is_first_cmd ? "True" : "False") << endl;
+            cerr << "\tFinal? " << (is_final_cmd ? "True" : "False") << endl;
+            cerr << "\tNumber? " << (is_number_pipe ? "True" : "False") << endl;
+            cerr << "\tError? " << (is_error_pipe ? "True" : "False") << endl;
+            #endif
+            #if 0
+            cerr << "Child Execute: " << args[0] << endl;
+            usleep(5000);
+            #endif
 
-//             /* Duplicate pipe */
-//             // STDERR -> socket
-//             dup2(user_shm_ptr[uid-1].sockfd, STDERR_FILENO);
+            /* Duplicate pipe */
+            // STDERR -> socket
+            dup2(user_shm_ptr[uid-1].sockfd, STDERR_FILENO);
 
-//             if (is_first_cmd) {
-//                 // Receive input from number pipe
-//                 for (size_t x = 0; x < me->number_pipes.size(); x++) {
-//                     if (me->number_pipes[x].number == 0) {
-//                         dup2(me->number_pipes[x].in, STDIN_FILENO);
-//                         #if 0
-//                         cerr << "First Number Pipe (in) " << me->number_pipes[x].in << " to stdin" << endl;
-//                         #endif
-//                         break;
-//                     }
-//                 }
+            if (is_first_cmd) {
+                // Receive input from number pipe
+                for (size_t x = 0; x < context->number_pipes.size(); x++) {
+                    if (context->number_pipes[x].number == 0) {
+                        dup2(context->number_pipes[x].in, STDIN_FILENO);
+                        #if 0
+                        cerr << "First Number Pipe (in) " << context->number_pipes[x].in << " to stdin" << endl;
+                        #endif
+                        break;
+                    }
+                }
 
-//                 // Setup output of normal pipe
-//                 if (me->pipes.size() > 0) {
-//                     dup2(me->pipes[i].out, STDOUT_FILENO);
-//                     #if 0
-//                     cerr << "First Normal Pipe (out) " << me->pipes[i].out << " to stdout" << endl;
-//                     #endif
-//                 }
+                // Setup output of normal pipe
+                if (context->pipes.size() > 0) {
+                    dup2(context->pipes[i].out, STDOUT_FILENO);
+                    #if 0
+                    cerr << "First Normal Pipe (out) " << context->pipes[i].out << " to stdout" << endl;
+                    #endif
+                }
 
-//                 // Recv from user pipe
-//                 if (is_input_user_pipe) {
-//                     if (is_input_user_pipe_error) {
-//                         int dev_null = open("/dev/null", O_RDWR);
-//                         dup2(dev_null, STDIN_FILENO);
-//                         close(dev_null);
-//                         #if 0
-//                         cerr << "Set up user pipe input to null" << endl;
-//                         #endif
-//                     } else {
-//                         dup2(user_pipes[input_user_pipe_idx].pipe.in, STDIN_FILENO);
-//                         #if 0
-//                         cerr << "Set up user pipe input to " << user_pipes[input_user_pipe_idx].pipe.in << endl;
-//                         #endif
-//                     }
+                // Recv from user pipe
+                if (is_input_user_pipe) {
+                    if (is_input_user_pipe_error) {
+                        int dev_null = open("/dev/null", O_RDWR);
+                        dup2(dev_null, STDIN_FILENO);
+                        close(dev_null);
+                        #if 0
+                        cerr << "Set up user pipe input to null" << endl;
+                        #endif
+                    } else {
+                        // dup2(user_pipes[input_user_pipe_idx].pipe.in, STDIN_FILENO);
+                        #if 0
+                        cerr << "Set up user pipe input to " << user_pipes[input_user_pipe_idx].pipe.in << endl;
+                        #endif
+                    }
 
-//                 }
-//             }
+                }
+            }
 
-//             // Setup input and output of normal pipe
-//             if (!is_first_cmd && !is_final_cmd) {
-//                 if (me->pipes.size() > 0) {
-//                     dup2(me->pipes[i-1].in, STDIN_FILENO);
-//                     dup2(me->pipes[i].out, STDOUT_FILENO);
-//                 }
-//                 #if 0
-//                 cerr << "Internal (in) " << me->pipes[i-1].in << " to stdin"  << endl;
-//                 cerr << "Internal (out) " << me->pipes[i].out << " to stdout" << endl;
-//                 #endif
-//                 // TODO: user pipe in the middle ??
-//             }
+            // Setup input and output of normal pipe
+            if (!is_first_cmd && !is_final_cmd) {
+                if (context->pipes.size() > 0) {
+                    dup2(context->pipes[i-1].in, STDIN_FILENO);
+                    dup2(context->pipes[i].out, STDOUT_FILENO);
+                }
+                #if 0
+                cerr << "Internal (in) " << context->pipes[i-1].in << " to stdin"  << endl;
+                cerr << "Internal (out) " << context->pipes[i].out << " to stdout" << endl;
+                #endif
+                // TODO: user pipe in the middle ??
+            }
 
-//             if (is_final_cmd) {
-//                 if (is_number_pipe) {
-//                     /* Number Pipe */
-//                     #if 0
-//                     cerr << "Final Number Pipe" << endl;
-//                     #endif
+            if (is_final_cmd) {
+                if (is_number_pipe) {
+                    /* Number Pipe */
+                    #if 0
+                    cerr << "Final Number Pipe" << endl;
+                    #endif
                     
-//                     // Setup Input
-//                     if (me->pipes.size() > 0) {
-//                         // Receive from previous command via normal pipe
-//                         dup2(me->pipes[i-1].in, STDIN_FILENO);
-//                         #if 0
-//                         cerr << "Final number Pipe (in) (from normal pip) " << me->pipes[i-1].in << " to stdin" << endl;
-//                         #endif
-//                     }
+                    // Setup Input
+                    if (context->pipes.size() > 0) {
+                        // Receive from previous command via normal pipe
+                        dup2(context->pipes[i-1].in, STDIN_FILENO);
+                        #if 0
+                        cerr << "Final number Pipe (in) (from normal pip) " << context->pipes[i-1].in << " to stdin" << endl;
+                        #endif
+                    }
                     
-//                     // Setup Output
-//                     for (size_t x = 0; x < me->number_pipes.size(); x++) {
-//                         if (me->number_pipes[x].number == command.number) {
-//                             dup2(me->number_pipes[x].out, STDOUT_FILENO);
-//                             close(me->number_pipes[x].out);
-//                             #if 0
-//                             cerr << "Final Number Pipe (out) " << me->number_pipes[x].out << " to stdout" << endl;
-//                             #endif
-//                             break;
-//                         }
-//                     }
-//                 } else if (is_error_pipe) {
-//                     #if 0
-//                     cerr << "Final Error Pipe" << endl;
-//                     #endif
-//                     /* Error Pipe */
-//                     for (size_t x = 0; x < me->number_pipes.size(); x++) {
-//                         if (me->number_pipes[x].number == command.number) {
-//                             dup2(me->number_pipes[x].out, STDOUT_FILENO);
-//                             dup2(me->number_pipes[x].out, STDERR_FILENO);
-//                             break;
-//                         }
-//                     }
-//                 } else if (is_output_user_pipe) {
-//                     #if 0
-//                     cerr << "Final User Pipe" << endl;
-//                     #endif
+                    // Setup Output
+                    for (size_t x = 0; x < context->number_pipes.size(); x++) {
+                        if (context->number_pipes[x].number == command.number) {
+                            dup2(context->number_pipes[x].out, STDOUT_FILENO);
+                            close(context->number_pipes[x].out);
+                            #if 0
+                            cerr << "Final Number Pipe (out) " << context->number_pipes[x].out << " to stdout" << endl;
+                            #endif
+                            break;
+                        }
+                    }
+                } else if (is_error_pipe) {
+                    #if 0
+                    cerr << "Final Error Pipe" << endl;
+                    #endif
+                    /* Error Pipe */
+                    for (size_t x = 0; x < context->number_pipes.size(); x++) {
+                        if (context->number_pipes[x].number == command.number) {
+                            dup2(context->number_pipes[x].out, STDOUT_FILENO);
+                            dup2(context->number_pipes[x].out, STDERR_FILENO);
+                            break;
+                        }
+                    }
+                } else if (is_output_user_pipe) {
+                    #if 0
+                    cerr << "Final User Pipe" << endl;
+                    #endif
 
-//                     if (me->pipes.size() > 0) {
-//                         // Set input
-//                         dup2(me->pipes[i-1].in, STDIN_FILENO);
-//                     }
+                    if (context->pipes.size() > 0) {
+                        // Set input
+                        dup2(context->pipes[i-1].in, STDIN_FILENO);
+                    }
 
-//                     // Set output
-//                     if (is_output_user_pipe_error) {
-//                         int dev_null = open("/dev/null", O_RDWR);
-//                         dup2(dev_null, STDOUT_FILENO);
-//                         close(dev_null);
-//                     } else {
-//                         dup2(user_pipes[output_user_pipe_idx].pipe.out, STDOUT_FILENO);
-//                     }
+                    // Set output
+                    if (is_output_user_pipe_error) {
+                        int dev_null = open("/dev/null", O_RDWR);
+                        dup2(dev_null, STDOUT_FILENO);
+                        close(dev_null);
+                    } else {
+                        // dup2(user_pipes[output_user_pipe_idx].pipe.out, STDOUT_FILENO);
+                    }
 
-//                 } else {
-//                     #if 0
-//                     cerr << "Final Normal Pipe" << endl;
-//                     #endif
-//                     /* Normal Pipe*/
-//                     if (me->pipes.size() > 0) {
-//                         dup2(me->pipes[i-1].in, STDIN_FILENO);
-//                         #if 0
-//                         cerr << "Set input from " << me->pipes[i-1].in << " to stdin" << endl;
-//                         #endif
-//                     }
+                } else {
+                    #if 0
+                    cerr << "Final Normal Pipe" << endl;
+                    #endif
+                    /* Normal Pipe*/
+                    if (context->pipes.size() > 0) {
+                        dup2(context->pipes[i-1].in, STDIN_FILENO);
+                        #if 0
+                        cerr << "Set input from " << context->pipes[i-1].in << " to stdin" << endl;
+                        #endif
+                    }
 
-//                     // Redirect to socket
-//                     dup2(user_shm_ptr[uid-1].sockfd, STDOUT_FILENO);
-//                     #if 0
-//                     cerr << "Set output to socket " << user_shm_ptr[uid-1].sockfd << endl;
-//                     #endif
-//                 }
-//             }
+                    // Redirect to socket
+                    dup2(user_shm_ptr[uid-1].sockfd, STDOUT_FILENO);
+                    #if 0
+                    cerr << "Set output to socket " << user_shm_ptr[uid-1].sockfd << endl;
+                    #endif
+                }
+            }
 
-//             /* Close pipe */
-//             for (int ci = 0; ci < me->pipes.size(); ci++) {
-//                 close(me->pipes[ci].in);
-//                 close(me->pipes[ci].out);
-//             }
-//             for (int ci = 0; ci < me->number_pipes.size(); ci++) {
-//                 close(me->number_pipes[ci].in);
-//                 close(me->number_pipes[ci].out);
-//             }
-//             for (int x=0; x < user_pipes.size(); ++x) {
-//                 close(user_pipes[x].pipe.in);
-//                 close(user_pipes[x].pipe.out);
-//             }
+            /* Close pipe */
+            for (int ci = 0; ci < context->pipes.size(); ci++) {
+                close(context->pipes[ci].in);
+                close(context->pipes[ci].out);
+            }
+            for (int ci = 0; ci < context->number_pipes.size(); ci++) {
+                close(context->number_pipes[ci].in);
+                close(context->number_pipes[ci].out);
+            }
+            // for (int x=0; x < user_pipes.size(); ++x) {
+            //     close(user_pipes[x].pipe.in);
+            //     close(user_pipes[x].pipe.out);
+            // }
 
-//             execute_command(me, args);
-//         }
-//     }
-//     me->pipes.clear();
-//     return 0;
-// }
-
+            execute_command(uid, args);
+        }
+    }
+    context->pipes.clear();
+    return 0;
+}
 
 int handle_command(int uid, string input, Context *context) {
-    return handle_builtin(uid, input, context);
     vector<Command> lines;
     int code;
 
     lines = parse_number_pipe(input);
 
     for (size_t i = 0; i < lines.size(); i++) {
-        // code = main_executor(uid, lines[i], context);
+        code = main_executor(uid, lines[i], context);
     }
 
     return code;
