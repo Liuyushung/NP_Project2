@@ -26,12 +26,16 @@ using namespace std;
 
 #define MAX_BUF_SIZE    15000
 #define CONTENT_SIZE    1025
+#define PATHLENGTH      64
 #define BUILT_IN_EXIT   99
 #define BUILT_IN_TRUE   1
 #define BUILT_IN_FALSE  0
 #define USER_LIMIT      30
-#define USERSHMKEY ((key_t) 7890)
-#define MSGSHMKEY  ((key_t) 7891)
+#define FIFO_LIMIT      100  // TODO: Size check
+#define USERSHMKEY  ((key_t) 7890)
+#define MSGSHMKEY   ((key_t) 7891)
+#define FIFOSHMKEY  ((key_t) 7892)
+#define USER_PIPE_DIR   "user_pipe/"
 
 typedef struct mypipe {
     int in;
@@ -67,6 +71,13 @@ typedef struct my_message {
     char content[CONTENT_SIZE];
 } Message;
 
+typedef struct my_fifo_info {
+    int src_uid;
+    int dst_uid;
+    char pathname[PATHLENGTH];
+    bool is_active;
+} FifoInfo;
+
 typedef struct user_context {
     string original_input;
     map<string, string> env;
@@ -75,11 +86,14 @@ typedef struct user_context {
 } Context;
 
 /* Global Value */
-int user_shm_id, msg_shm_id;
+int user_shm_id, msg_shm_id, fifo_shm_id;
 User *user_shm_ptr;
 Message *msg_shm_ptr;
+FifoInfo *fifo_shm_ptr;
 int listen_sock;
-pthread_mutex_t user_mutex, msg_mutex;
+pthread_mutex_t user_mutex, msg_mutex, fifo_mutex;
+regex up_in_pattern("[<][1-9]\\d?\\d?\\d?[0]?");
+regex up_out_pattern("[>][1-9]\\d?\\d?\\d?[0]?");
 
 /* Function Prototype */
 int get_online_user_number();
@@ -128,12 +142,28 @@ void init_shm() {
     msg_shm_ptr = static_cast<Message *>(tmp_ptr);
     bzero((char *)msg_shm_ptr, sizeof(Message) * 1);
 
+    // Get FIFO shared memory ID
+    fifo_shm_id = shmget(FIFOSHMKEY, sizeof(Message) * 1, IPC_CREAT | IPC_EXCL | SHM_R | SHM_W);
+    if (fifo_shm_id < 0) {
+        perror("Get fifo shm");
+        exit(0);
+    }
+    // Attach fifo shared memory
+    tmp_ptr = shmat(fifo_shm_id, NULL, 0);
+    if (*((int*) tmp_ptr) == -1) {
+        perror("Map fifo shm");
+        exit(0);
+    }
+    fifo_shm_ptr = static_cast<FifoInfo *>(tmp_ptr);
+    bzero((char *)fifo_shm_ptr, sizeof(FifoInfo) * FIFO_LIMIT);
+
     return;
 }
 
 void init_lock() {
     pthread_mutexattr_t user_mutex_attr;
     pthread_mutexattr_t msg_mutex_attr;
+    pthread_mutexattr_t fifo_mutex_attr;
 
     pthread_mutexattr_init(&user_mutex_attr);
     pthread_mutexattr_setpshared(&user_mutex_attr, PTHREAD_PROCESS_SHARED);
@@ -142,6 +172,10 @@ void init_lock() {
     pthread_mutexattr_init(&msg_mutex_attr);
     pthread_mutexattr_setpshared(&msg_mutex_attr, PTHREAD_PROCESS_SHARED);
     pthread_mutex_init(&msg_mutex, &msg_mutex_attr);
+
+    pthread_mutexattr_init(&fifo_mutex_attr);
+    pthread_mutexattr_setpshared(&fifo_mutex_attr, PTHREAD_PROCESS_SHARED);
+    pthread_mutex_init(&fifo_mutex, &fifo_mutex_attr);
 }
 
 /* Server Related*/
@@ -385,7 +419,7 @@ string read_msg(int sockfd) {
     string msg(buf);
     msg.erase(remove(msg.begin(), msg.end(), '\n'), msg.end());
     msg.erase(remove(msg.begin(), msg.end(), '\r'), msg.end());
-    #if 1
+    #if 0
     ++cmd_counter;
     printf("(%d) Recv (%ld): %s\n", cmd_counter, msg.length(), msg.c_str());
     #endif
@@ -767,6 +801,159 @@ void execute_command(int uid, vector<string> args) {
     }
 }
 
+int create_user_pipe(int src_uid, int dst_uid) {
+    int result_index = -1;
+    char path[PATHLENGTH];
+    bzero(path, PATHLENGTH);
+
+    pthread_mutex_lock(&fifo_mutex);
+    if (fifo_shm_ptr[(src_uid-1) * USER_LIMIT + (dst_uid-1)].is_active == false) {
+        result_index = (src_uid-1) * USER_LIMIT + (dst_uid-1);
+        sprintf(path, "%s%dto%d", USER_PIPE_DIR, src_uid, dst_uid);
+
+        fifo_shm_ptr[(src_uid-1) * USER_LIMIT + (dst_uid-1)].is_active = true;
+        fifo_shm_ptr[(src_uid-1) * USER_LIMIT + (dst_uid-1)].src_uid = src_uid;
+        fifo_shm_ptr[(src_uid-1) * USER_LIMIT + (dst_uid-1)].dst_uid = dst_uid;
+        strncpy(fifo_shm_ptr[(src_uid-1) * USER_LIMIT + (dst_uid-1)].pathname, path, PATHLENGTH);
+
+    }
+    pthread_mutex_unlock(&fifo_mutex);
+
+    mkfifo(path, 0666);
+
+    return result_index;
+}
+
+int search_user_pipe(int src_uid, int dst_uid) {
+    int result = -1;
+
+    for (int x=0; x < FIFO_LIMIT; ++x) {
+        if (fifo_shm_ptr[x].is_active) {
+            if (fifo_shm_ptr[x].src_uid == src_uid && fifo_shm_ptr[x].dst_uid == dst_uid) {
+                result = x;
+                break;
+            }
+        }
+    }
+    
+    return result;
+}
+
+bool handle_input_user_pipe(int uid, string cmd, int *up_idx, Context *context) {
+    int src_uid;
+    bool error = false;
+    ostringstream oss;
+    string msg;
+    smatch result;
+
+    regex_search(cmd, result, up_in_pattern);
+    src_uid = atoi(cmd.substr(result.position()+1, result.length()-1).c_str());
+
+    if (!error) {
+        // Check user is exist
+        if (!has_user(src_uid)) {
+            oss << "*** Error: user #" << src_uid << " does not exist yet. ***" << endl;
+            msg = oss.str();
+            sendout_msg(user_shm_ptr[uid-1].sockfd, msg);
+            
+            error = true;
+        }
+    }
+
+    if (!error) {
+        // Search user pipe
+        *up_idx = search_user_pipe(src_uid, uid);
+
+        if (*up_idx == -1) {
+            // Not found
+            oss.clear();
+            oss << "*** Error: the pipe #" << src_uid << "->#" << uid << " does not exist yet. ***" << endl;
+            msg = oss.str();
+
+            sendout_msg(user_shm_ptr[uid-1].sockfd, msg);
+
+            error = true;
+        }
+    }
+
+    if (!error) {
+        // Broadcast Message
+        oss << "*** " << user_shm_ptr[uid-1].name << " (#" << uid << ") just received from "
+            << user_shm_ptr[src_uid-1].name << " (#" << src_uid << ") by '" << context->original_input << "' ***" << endl;
+        msg = oss.str();
+        broadcast(msg);
+    }
+
+    return error;
+}
+
+bool handle_output_user_pipe(int uid, string cmd, int *up_idx, Context *context) {
+    int dst_uid;
+    bool error = false;
+    ostringstream oss;
+    string msg;
+    smatch result;
+
+    regex_search(cmd, result, up_out_pattern);
+    dst_uid = atoi(cmd.substr(result.position()+1, result.length()-1).c_str());
+
+    if (!error) {
+        // Check user is exist
+        if (!has_user(dst_uid)) {
+            oss << "*** Error: user #" << dst_uid << " does not exist yet. ***" << endl;
+            msg = oss.str();
+            sendout_msg(user_shm_ptr[uid-1].sockfd, msg);
+
+            error = true;
+        }
+    }
+
+    if (!error) {
+        // Search pipe
+        int tmp;
+        int result = search_user_pipe(uid, dst_uid);
+
+        if (result != -1) {
+            // User pipe is exist
+            oss.clear();
+            oss << "*** Error: the pipe #" << uid << "->#" << dst_uid << " already exists. ***" << endl;
+            msg = oss.str();
+            sendout_msg(user_shm_ptr[uid-1].sockfd, msg);
+
+            error = true;
+        }
+    }
+
+    if (!error) {
+        // Broadcast Message
+        oss << "*** " << user_shm_ptr[uid-1].name << " (#" << uid << ") just piped '" << context->original_input << "' to "
+            << user_shm_ptr[dst_uid-1].name << " (#" << user_shm_ptr[dst_uid-1].uid << ") ***" << endl;
+        msg = oss.str();
+
+        broadcast(msg);
+
+        // Create user pipe
+        *up_idx = create_user_pipe(uid, dst_uid);
+    }
+
+    return error;
+}
+
+void handle_user_pipe(int uid, string cmd, bool *in, bool *out, bool *in_err, bool *out_err, int *in_idx, int *out_idx, Context *context) {
+    smatch result;
+
+    *in  = regex_search(cmd, result, up_in_pattern);
+    *out = regex_search(cmd, result, up_out_pattern);
+
+    if (*in) {
+        *in_err = handle_input_user_pipe(uid, cmd, in_idx, context);
+    }
+
+    if (*out) {
+        *out_err = handle_output_user_pipe(uid, cmd, out_idx, context);
+    }
+}
+
 int main_executor(int uid, Command &command, Context *context) {
     /* Pre-Process */
     decrement_and_cleanup_number_pipes(context->number_pipes);
@@ -802,7 +989,10 @@ int main_executor(int uid, Command &command, Context *context) {
         if (i == command.cmds.size() - 1)  is_final_cmd = true;
 
         // Check if there are user pipes
-        // TODO: user pipe
+        handle_user_pipe(uid, command.cmds[i],
+            &is_input_user_pipe, &is_output_user_pipe,
+            &is_input_user_pipe_error, &is_output_user_pipe_error,
+            &input_user_pipe_idx, &output_user_pipe_idx, context);
 
         /* Parse Command to Args */
         #if 0
@@ -814,18 +1004,13 @@ int main_executor(int uid, Command &command, Context *context) {
 
             if (is_white_char(arg)) continue;
 
-            // if (regex_search(arg, in_result, up_in_pattern)) {
-            //     ignore_arg = true;
-            //     is_input_user_pipe_error = handle_input_user_pipe(me, arg, &input_user_pipe_idx);
-            // }
+            if (regex_search(arg, in_result, up_in_pattern)) {
+                ignore_arg = true;
+            }
 
-            // if (regex_search(arg, out_result, up_out_pattern)) {
-            //     ignore_arg = true;
-            //     is_output_user_pipe_error = handle_output_user_pipe(me, arg, &output_user_pipe_idx);
-            //     #if 0
-            //     debug_user_pipes();
-            //     #endif
-            // }
+            if (regex_search(arg, out_result, up_out_pattern)) {
+                ignore_arg = true;
+            }
 
             // Handle number and error pipe
             if (is_final_cmd) {
@@ -927,9 +1112,9 @@ int main_executor(int uid, Command &command, Context *context) {
 
             // User Pipe
             // if (input_user_pipe_idx != -1) {
-            //     close(user_pipes[input_user_pipe_idx].pipe.in);
-            //     close(user_pipes[input_user_pipe_idx].pipe.out);
-            //     user_pipes[input_user_pipe_idx].is_done = true;
+            //     close(fifo_shm_ptr[input_user_pipe_idx].pipe.in);
+            //     close(fifo_shm_ptr[input_user_pipe_idx].pipe.out);
+            //     fifo_shm_ptr[input_user_pipe_idx].is_done = true;
             //     clean_user_pipe();
             // }
 
@@ -994,8 +1179,15 @@ int main_executor(int uid, Command &command, Context *context) {
                         #endif
                     } else {
                         // dup2(user_pipes[input_user_pipe_idx].pipe.in, STDIN_FILENO);
+                        int fd = open(fifo_shm_ptr[input_user_pipe_idx].pathname, O_RDONLY);
+                        dup2(fd, STDIN_FILENO);
+                        close(fd);
+                        pthread_mutex_lock(&fifo_mutex);
+                        fifo_shm_ptr[input_user_pipe_idx].is_active = false;
+                        pthread_mutex_unlock(&fifo_mutex);
+
                         #if 0
-                        cerr << "Set up user pipe input to " << user_pipes[input_user_pipe_idx].pipe.in << endl;
+                        cerr << "Set up user pipe input to " << fifo_shm_ptr[input_user_pipe_idx].pipe.in << endl;
                         #endif
                     }
 
@@ -1070,7 +1262,10 @@ int main_executor(int uid, Command &command, Context *context) {
                         dup2(dev_null, STDOUT_FILENO);
                         close(dev_null);
                     } else {
-                        // dup2(user_pipes[output_user_pipe_idx].pipe.out, STDOUT_FILENO);
+                        // dup2(fifo_shm_ptr[output_user_pipe_idx].pipe.out, STDOUT_FILENO);
+                        int fd = open(fifo_shm_ptr[output_user_pipe_idx].pathname, O_WRONLY);
+                        dup2(fd, STDOUT_FILENO);
+                        close(fd);
                     }
 
                 } else {
@@ -1102,9 +1297,9 @@ int main_executor(int uid, Command &command, Context *context) {
                 close(context->number_pipes[ci].in);
                 close(context->number_pipes[ci].out);
             }
-            // for (int x=0; x < user_pipes.size(); ++x) {
-            //     close(user_pipes[x].pipe.in);
-            //     close(user_pipes[x].pipe.out);
+            // for (int x=0; x < fifo_shm_ptr.size(); ++x) {
+            //     close(fifo_shm_ptr[x].pipe.in);
+            //     close(fifo_shm_ptr[x].pipe.out);
             // }
 
             execute_command(uid, args);
@@ -1215,7 +1410,7 @@ int main(int argc,char const *argv[]) {
             server_exit();
         }
         
-        #if 1
+        #if 0
         debug_user();
         #endif
     }
