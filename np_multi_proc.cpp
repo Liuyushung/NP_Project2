@@ -24,6 +24,7 @@
 using namespace std;
 
 #define MAX_BUF_SIZE    15000
+#define CONTENT_SIZE    1025
 #define BUILT_IN_EXIT   99
 #define BUILT_IN_TRUE   1
 #define BUILT_IN_FALSE  0
@@ -42,7 +43,9 @@ typedef struct my_user {
 
 typedef struct my_message {
     int length;
-    char content[1025];
+    int counter;
+    bool is_active;
+    char content[CONTENT_SIZE];
 } Message;
 
 /* Global Value */
@@ -50,6 +53,12 @@ int user_shm_id, msg_shm_id;
 User *user_shm_ptr;
 Message *msg_shm_ptr;
 int listen_sock;
+pthread_mutex_t user_mutex, msg_mutex;
+
+/* Function Prototype */
+int get_online_user_number();
+void sendout_msg(int sockfd, string &msg);
+/* Function Prototype End */
 
 void init_shm() {
     void *tmp_ptr;
@@ -78,7 +87,7 @@ void init_shm() {
     #endif
 
     // Get message shared memory ID
-    msg_shm_id = shmget(MSGSHMKEY, sizeof(Message) * 10, IPC_CREAT | IPC_EXCL | SHM_R | SHM_W);
+    msg_shm_id = shmget(MSGSHMKEY, sizeof(Message) * 1, IPC_CREAT | IPC_EXCL | SHM_R | SHM_W);
     if (msg_shm_id < 0) {
         perror("Get msg shm");
         exit(0);
@@ -90,12 +99,37 @@ void init_shm() {
         exit(0);
     }
     msg_shm_ptr = static_cast<Message *>(tmp_ptr);
-    bzero((char *)msg_shm_ptr, sizeof(Message) * 10);
+    bzero((char *)msg_shm_ptr, sizeof(Message) * 1);
 
     return;
 }
 
+void init_lock() {
+    pthread_mutexattr_t user_mutex_attr;
+    pthread_mutexattr_t msg_mutex_attr;
+
+    pthread_mutexattr_init(&user_mutex_attr);
+    pthread_mutexattr_setpshared(&user_mutex_attr, PTHREAD_PROCESS_SHARED);
+    pthread_mutex_init(&user_mutex, &user_mutex_attr);
+
+    pthread_mutexattr_init(&msg_mutex_attr);
+    pthread_mutexattr_setpshared(&msg_mutex_attr, PTHREAD_PROCESS_SHARED);
+    pthread_mutex_init(&msg_mutex, &msg_mutex_attr);
+}
+
+/* Server Related*/
 void server_exit() {
+    cout << "Wait all user leave..." << endl;
+    while (true) {
+        int counter = get_online_user_number();
+        if (counter == 0) {
+            break;
+        } else {
+            cout << "Remain " << counter << " users online" << endl;
+            usleep(100);
+        }
+    }
+
     cout << "Detach and Remove Shared Memory" << endl;
     if (shmdt(user_shm_ptr) < 0) {
         perror("Detach user shm");
@@ -111,6 +145,7 @@ void server_exit() {
     }
     cout << "Close listen socket" << endl;
     close(listen_sock);
+
 
     exit(0);
 }
@@ -177,6 +212,37 @@ int get_listen_socket(const char *port) {
     return listen_sock;
 }
 
+int get_online_user_number() {
+    int counter = 0;
+
+    pthread_mutex_lock(&user_mutex);
+    for(int x=0; x < USER_LIMIT; ++x) {
+        if (user_shm_ptr[x].is_active) {
+            ++counter;
+        }
+    }
+    pthread_mutex_unlock(&user_mutex);
+
+    return counter;
+}
+
+int get_sockfd_by_pid(pid_t pid) {
+    for(int x=0; x < USER_LIMIT; ++x) {
+        if (user_shm_ptr[x].is_active && user_shm_ptr[x].pid == pid) {
+            return user_shm_ptr[x].sockfd;
+        }
+    }
+}
+
+int get_uid_by_pid(pid_t pid) {
+    for(int x=0; x < USER_LIMIT; ++x) {
+        if (user_shm_ptr[x].is_active && user_shm_ptr[x].pid == pid) {
+            return user_shm_ptr[x].uid;
+        }
+    }
+}
+/* Server Related End*/
+
 /* User Related */
 void debug_user() {
     cout << "***** Debug user start" << endl;
@@ -200,6 +266,7 @@ int create_user(int sock, sockaddr_in addr) {
     char ip[INET6_ADDRSTRLEN];
     sprintf(ip, "%s:%d", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
 
+    pthread_mutex_lock(&user_mutex);
     for (uid=1; uid <= USER_LIMIT; ++uid) {
         if(user_shm_ptr[uid-1].is_active == false) {
             user_shm_ptr[uid-1].uid = uid;
@@ -212,6 +279,7 @@ int create_user(int sock, sockaddr_in addr) {
             break;
         }
     }
+    pthread_mutex_unlock(&user_mutex);
 
     return uid;
 }
@@ -223,9 +291,144 @@ void user_exit_procedure(int uid) {
 }
 
 void signal_child_handler(int sig) {
+    char buf[CONTENT_SIZE];
+    bzero(buf, CONTENT_SIZE);
+
+    if (sig == SIGUSR1) {
+        // Receive boradcast message
+        while (true) {
+            pthread_mutex_lock(&msg_mutex);
+            strncpy(buf, msg_shm_ptr->content, msg_shm_ptr->length);
+            msg_shm_ptr->counter--;
+
+            if (msg_shm_ptr->counter <= 0) {
+                msg_shm_ptr->is_active = false;
+            }
+            pthread_mutex_unlock(&msg_mutex);
+            break;
+        }
+
+        string msg(buf);
+        sendout_msg(get_sockfd_by_pid(getpid()), msg);
+    } else if (sig == SIGUSR2) {
+        // Receive user pipe
+	} else if(sig == SIGINT || sig == SIGQUIT || sig == SIGTERM){
+        user_exit_procedure(get_uid_by_pid(getpid()));
+    }
+
 
 }
 /* User Related End*/
+
+/* Network IO */
+string read_msg(int sockfd) {
+    static int cmd_counter = 0;
+    char buf[MAX_BUF_SIZE];
+    bzero(buf, MAX_BUF_SIZE);
+
+    if (read(sockfd, buf, MAX_BUF_SIZE) < 0) {
+        perror("Read Message.");
+        return "";
+    }
+
+    string msg(buf);
+    msg.erase(remove(msg.begin(), msg.end(), '\n'), msg.end());
+    msg.erase(remove(msg.begin(), msg.end(), '\r'), msg.end());
+    #if 1
+    ++cmd_counter;
+    printf("(%d) Recv (%ld): %s\n", cmd_counter, msg.length(), msg.c_str());
+    #endif
+
+    return msg;
+}
+
+void sendout_msg(int sockfd, string &msg) {
+    int n = write(sockfd, msg.c_str(), msg.length());
+    if (n < 0) {
+        perror("Sendout Message");
+        exit(0);
+    }
+}
+/* Network IO End */
+
+void broadcast(string msg) {
+    while (true) {
+        pthread_mutex_lock(&msg_mutex);
+        if (msg_shm_ptr->is_active) {
+            pthread_mutex_unlock(&msg_mutex);
+            usleep(100);
+            continue;
+        } else {
+            msg_shm_ptr->is_active = true;
+            msg_shm_ptr->counter = get_online_user_number();
+            msg_shm_ptr->length = msg.length();
+            strncpy(msg_shm_ptr->content, msg.c_str(), msg.length());
+            pthread_mutex_unlock(&msg_mutex);
+            break;
+        }
+    }
+
+    for (int x=0; x < USER_LIMIT; ++x) {
+        if (user_shm_ptr[x].is_active) {
+            kill(user_shm_ptr[x].pid, SIGUSR1);
+        }
+    }
+    
+    return;
+}
+
+void login_prompt(int uid) {
+    ostringstream oss;
+    string msg;
+
+    // Create message
+    oss << "*** User '" << user_shm_ptr[uid-1].name << "' entered from " << user_shm_ptr[uid-1].ip_addr << ". ***" << endl;
+    msg = oss.str();
+
+    // Broadcast
+    broadcast(msg);
+}
+
+void logout_prompt(int uid) {
+    ostringstream oss;
+    string msg;
+
+    // Create message
+    oss << "*** User '" << user_shm_ptr[uid-1].name << "' left. ***" << endl;
+    msg = oss.str();
+
+    // Broadcast
+    broadcast(msg);
+}
+
+void command_prompt(int uid) {
+    string msg("% ");
+    sendout_msg(user_shm_ptr[uid-1].sockfd, msg);
+}
+
+void welcome(int uid) {
+    ostringstream oss;
+    string msg;
+
+    oss << "****************************************" << endl
+        << "** Welcome to the information server. **" << endl
+        << "****************************************" << endl;
+    msg = oss.str();
+
+    sendout_msg(user_shm_ptr[uid-1].sockfd, msg);
+}
+
+void serve_client(int uid) {
+    welcome(uid);
+    login_prompt(uid);
+    command_prompt(uid);
+
+    while (true) {
+        string input = read_msg(user_shm_ptr[uid-1].sockfd);
+        sendout_msg(user_shm_ptr[uid-1].sockfd, input);
+    }
+
+}
 
 int main(int argc,char const *argv[]) {
     if (argc != 2) {
@@ -235,6 +438,7 @@ int main(int argc,char const *argv[]) {
 
     /* Initialize shared memory */
     init_shm();
+    init_lock();
 
     /* Setup server signal handler */
     signal(SIGCHLD, signal_server_handler);
@@ -271,10 +475,15 @@ int main(int argc,char const *argv[]) {
             close(client_sock);
         } else if (pid == 0) {
             /* Child */
+            // Setup signal handler
+            signal(SIGUSR1, signal_child_handler);
+            signal(SIGUSR2, signal_child_handler);
+            signal(SIGINT, signal_child_handler);
+            signal(SIGQUIT, signal_child_handler);
+            signal(SIGTERM, signal_child_handler);
+            // Create user
             int uid = create_user(client_sock, c_addr);
-            cout << "Pid: " << getpid() << " Uid: " << uid << endl;
-            sleep(10);
-            user_exit_procedure(uid);
+            serve_client(uid);
         } else {
             perror("Server fork");
             server_exit();
