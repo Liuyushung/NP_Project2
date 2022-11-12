@@ -274,7 +274,10 @@ string read_msg(int sockfd) {
     char buf[MAX_BUF_SIZE];
     bzero(buf, MAX_BUF_SIZE);
 
-    read(sockfd, buf, MAX_BUF_SIZE);
+    if (read(sockfd, buf, MAX_BUF_SIZE) < 0) {
+        perror("Read Message.");
+        return "";
+    }
 
     string msg(buf);
     msg.erase(remove(msg.begin(), msg.end(), '\n'), msg.end());

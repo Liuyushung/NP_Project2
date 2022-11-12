@@ -17,10 +17,10 @@ void interrupt_handler(int sig) {
 }
 
 int main(int argc,char const *argv[]) {
-    // if (argc != 2) {
-    //     cout << "Usage: prog port" << endl;
-    //     exit(0);
-    // }
+    if (argc != 2) {
+        cout << "Usage: prog port" << endl;
+        exit(0);
+    }
     signal(SIGINT, interrupt_handler);
 
     struct sockaddr_in c_addr;
@@ -34,8 +34,8 @@ int main(int argc,char const *argv[]) {
     c_addr_len = sizeof(c_addr);
     FD_ZERO(&afds);
 
-    // listen_sock = get_listen_socket(argv[1]);
-    listen_sock = get_listen_socket("12345");
+    listen_sock = get_listen_socket(argv[1]);
+    // listen_sock = get_listen_socket("12345");
     nfds = listen_sock;
 
     FD_SET(listen_sock, &afds);
