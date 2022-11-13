@@ -423,7 +423,7 @@ void signal_child_handler(int sig) {
 /* User Related End*/
 
 /* Network IO */
-string read_msg(int sockfd) {
+string read_msg(int uid, int sockfd) {
     static int cmd_counter = 0;
     char buf[MAX_BUF_SIZE];
     bzero(buf, MAX_BUF_SIZE);
@@ -438,9 +438,11 @@ string read_msg(int sockfd) {
     getline(cin, msg);
     msg.erase(remove(msg.begin(), msg.end(), '\n'), msg.end());
     msg.erase(remove(msg.begin(), msg.end(), '\r'), msg.end());
+
     #if 0
-    ++cmd_counter;
-    printf("(%d) Recv (%ld): %s\n", cmd_counter, msg.length(), msg.c_str());
+    // ++cmd_counter;
+    // printf("(%d) Recv (%ld): %s\n", uid, msg.length(), msg.c_str());
+    cout << "uid: " << uid << " Recv: " << msg << endl;
     #endif
 
     return msg;
@@ -1361,9 +1363,16 @@ int run_shell(int uid, string input, Context *context) {
 }
 
 void serve_client(int uid) {
+    // printf("serve client: %d\n", uid);
+    // printf("(%d) welcome\n", uid);
     welcome(uid);
+    // printf("(%d) welcome done\n", uid);
+    // printf("(%d) login prompt\n", uid);
     login_prompt(uid);
+    // printf("(%d) login prompt done\n", uid);
+    // printf("(%d) command prompt\n", uid);
     command_prompt(uid);
+    // printf("(%d) command prompt done\n", uid);
     Context context;
 
     // Set default PATH
@@ -1371,7 +1380,7 @@ void serve_client(int uid) {
     setenv("PATH", "bin:.", 1);
 
     while (true) {
-        string input = read_msg(user_shm_ptr[uid-1].sockfd);
+        string input = read_msg(uid, user_shm_ptr[uid-1].sockfd);
         context.original_input = input;
 
         // Run shell

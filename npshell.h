@@ -414,6 +414,10 @@ void main_executor(Command &command) {
                     #endif
                     close(number_pipes[x].in);
                     close(number_pipes[x].out);
+                    
+                    // Remove number pipe
+                    number_pipes.erase(number_pipes.begin() + x);
+                    --x;
                 }
             }
 
