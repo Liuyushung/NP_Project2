@@ -31,7 +31,7 @@ using namespace std;
 #define BUILT_IN_TRUE   1
 #define BUILT_IN_FALSE  0
 #define USER_LIMIT      30
-#define FIFO_LIMIT      100  // TODO: Size check
+#define FIFO_LIMIT      USER_LIMIT * USER_LIMIT  // TODO: Size check
 #define USERSHMKEY  ((key_t) 7890)
 #define MSGSHMKEY   ((key_t) 7891)
 #define FIFOSHMKEY  ((key_t) 7892)
@@ -99,6 +99,7 @@ regex up_out_pattern("[>][1-9]\\d?\\d?\\d?[0]?");
 int get_online_user_number();
 void sendout_msg(int sockfd, string &msg);
 void logout_prompt(int uid);
+void clean_user_pipe(int uid);
 /* Function Prototype End */
 
 void init_shm() {
@@ -143,7 +144,7 @@ void init_shm() {
     bzero((char *)msg_shm_ptr, sizeof(Message) * 1);
 
     // Get FIFO shared memory ID
-    fifo_shm_id = shmget(FIFOSHMKEY, sizeof(Message) * 1, IPC_CREAT | IPC_EXCL | SHM_R | SHM_W);
+    fifo_shm_id = shmget(FIFOSHMKEY, sizeof(FifoInfo) * FIFO_LIMIT, IPC_CREAT | IPC_EXCL | SHM_R | SHM_W);
     if (fifo_shm_id < 0) {
         perror("Get fifo shm");
         exit(0);
@@ -179,7 +180,7 @@ void init_lock() {
 }
 
 /* Server Related*/
-void server_exit() {
+void server_exit_procedure() {
     cout << "Wait all user leave..." << endl;
     while (true) {
         int counter = get_online_user_number();
@@ -204,6 +205,12 @@ void server_exit() {
     if (shmctl(msg_shm_id, IPC_RMID, NULL) < 0) {
         perror("Remove message shared memory");
     }
+    if (shmdt(fifo_shm_ptr) < 0) {
+        perror("Detach fifo shm");
+    }
+    if (shmctl(fifo_shm_id, IPC_RMID, NULL) < 0) {
+        perror("Remove fifo shared memory");
+    }
     cout << "Close listen socket" << endl;
     close(listen_sock);
 
@@ -215,7 +222,7 @@ void signal_server_handler(int sig) {
     if (sig == SIGCHLD) {
 		while(waitpid (-1, NULL, WNOHANG) > 0);
 	} else if(sig == SIGINT || sig == SIGQUIT || sig == SIGTERM){
-        server_exit();
+        server_exit_procedure();
 	}
 }
 
@@ -369,9 +376,12 @@ int create_user(int sock, sockaddr_in addr) {
 }
 
 void user_exit_procedure(int uid) {
+    cout << "user_exit_procedure" << endl;
     logout_prompt(uid);
+    // clean_user_pipe(uid);
     close(user_shm_ptr[uid-1].sockfd);
     bzero(&(user_shm_ptr[uid-1]), sizeof(User));
+    cout << "user_exit_procedure done" << endl;
     exit(0);
 }
 
@@ -754,7 +764,6 @@ int handle_builtin(int uid, string cmd, Context *context) {
 
     return BUILT_IN_FALSE;
 }
-// Built-in Command End
 
 void execute_command(int uid, vector<string> args) {
     int fd;
@@ -799,6 +808,20 @@ void execute_command(int uid, vector<string> args) {
         sendout_msg(user_shm_ptr[uid-1].sockfd, msg);
         exit(1);
     }
+}
+
+void clean_user_pipe(int uid) {
+    cout << "clean_user_pipe start" << endl;
+    pthread_mutex_lock(&fifo_mutex);
+    for (int x=0; x < FIFO_LIMIT; ++x) {
+        if (fifo_shm_ptr[x].is_active) {
+            if (fifo_shm_ptr[x].src_uid == uid || fifo_shm_ptr[x].dst_uid == uid) {
+                fifo_shm_ptr[x].is_active = false;
+            }
+        }
+    }
+    pthread_mutex_unlock(&fifo_mutex);
+    cout << "clean_user_pipe start done" << endl;
 }
 
 int create_user_pipe(int src_uid, int dst_uid) {
@@ -1110,14 +1133,6 @@ int main_executor(int uid, Command &command, Context *context) {
                 }
             }
 
-            // User Pipe
-            // if (input_user_pipe_idx != -1) {
-            //     close(fifo_shm_ptr[input_user_pipe_idx].pipe.in);
-            //     close(fifo_shm_ptr[input_user_pipe_idx].pipe.out);
-            //     fifo_shm_ptr[input_user_pipe_idx].is_done = true;
-            //     clean_user_pipe();
-            // }
-
             if (is_final_cmd && !(is_number_pipe || is_error_pipe) && !is_output_user_pipe) {
                 // Final process, wait
                 #if 0
@@ -1263,7 +1278,7 @@ int main_executor(int uid, Command &command, Context *context) {
                         close(dev_null);
                     } else {
                         // dup2(fifo_shm_ptr[output_user_pipe_idx].pipe.out, STDOUT_FILENO);
-                        int fd = open(fifo_shm_ptr[output_user_pipe_idx].pathname, O_WRONLY);
+                        int fd = open(fifo_shm_ptr[output_user_pipe_idx].pathname, O_RDWR);
                         dup2(fd, STDOUT_FILENO);
                         close(fd);
                     }
@@ -1407,7 +1422,7 @@ int main(int argc,char const *argv[]) {
             serve_client(uid);
         } else {
             perror("Server fork");
-            server_exit();
+            server_exit_procedure();
         }
         
         #if 0
