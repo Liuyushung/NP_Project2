@@ -376,12 +376,10 @@ int create_user(int sock, sockaddr_in addr) {
 }
 
 void user_exit_procedure(int uid) {
-    cout << "user_exit_procedure" << endl;
     logout_prompt(uid);
     // clean_user_pipe(uid);
     close(user_shm_ptr[uid-1].sockfd);
     bzero(&(user_shm_ptr[uid-1]), sizeof(User));
-    cout << "user_exit_procedure done" << endl;
     exit(0);
 }
 
@@ -1278,7 +1276,7 @@ int main_executor(int uid, Command &command, Context *context) {
                         close(dev_null);
                     } else {
                         // dup2(fifo_shm_ptr[output_user_pipe_idx].pipe.out, STDOUT_FILENO);
-                        int fd = open(fifo_shm_ptr[output_user_pipe_idx].pathname, O_RDWR);
+                        int fd = open(fifo_shm_ptr[output_user_pipe_idx].pathname, O_WRONLY);
                         dup2(fd, STDOUT_FILENO);
                         close(fd);
                     }
