@@ -31,7 +31,7 @@ using namespace std;
 #define BUILT_IN_TRUE   1
 #define BUILT_IN_FALSE  0
 #define USER_LIMIT      30
-#define FIFO_LIMIT      USER_LIMIT * USER_LIMIT  // TODO: Size check
+#define FIFO_LIMIT      USER_LIMIT * USER_LIMIT
 #define USERSHMKEY  ((key_t) 7890)
 #define MSGSHMKEY   ((key_t) 7891)
 #define FIFOSHMKEY  ((key_t) 7892)
@@ -220,10 +220,18 @@ void server_exit_procedure() {
 
 void signal_server_handler(int sig) {
     if (sig == SIGCHLD) {
-		while(waitpid (-1, NULL, WNOHANG) > 0);
-	} else if(sig == SIGINT || sig == SIGQUIT || sig == SIGTERM){
+        int stat;
+        while(waitpid(-1, &stat, WNOHANG) > 0) {
+            // Remove zombie process
+        }
+
+    } else if (sig == SIGINT || sig == SIGQUIT || sig == SIGTERM) {
         server_exit_procedure();
-	}
+    } else if (sig == SIGUSR2) {
+        #if 0
+        cout << "Online user: " << get_online_user_number() << endl;
+        #endif
+    }
 }
 
 bool is_user_up_to_limit() {
@@ -377,9 +385,10 @@ int create_user(int sock, sockaddr_in addr) {
 
 void user_exit_procedure(int uid) {
     logout_prompt(uid);
-    // clean_user_pipe(uid);
+    clean_user_pipe(uid);
     close(user_shm_ptr[uid-1].sockfd);
     bzero(&(user_shm_ptr[uid-1]), sizeof(User));
+    kill(getppid(), SIGUSR2);
     exit(0);
 }
 
@@ -405,7 +414,7 @@ void signal_child_handler(int sig) {
         sendout_msg(get_sockfd_by_pid(getpid()), msg);
     } else if (sig == SIGUSR2) {
         // Receive user pipe
-	} else if(sig == SIGINT || sig == SIGQUIT || sig == SIGTERM){
+    } else if(sig == SIGINT || sig == SIGQUIT || sig == SIGTERM){
         user_exit_procedure(get_uid_by_pid(getpid()));
     }
 
@@ -809,17 +818,20 @@ void execute_command(int uid, vector<string> args) {
 }
 
 void clean_user_pipe(int uid) {
-    cout << "clean_user_pipe start" << endl;
     pthread_mutex_lock(&fifo_mutex);
     for (int x=0; x < FIFO_LIMIT; ++x) {
         if (fifo_shm_ptr[x].is_active) {
             if (fifo_shm_ptr[x].src_uid == uid || fifo_shm_ptr[x].dst_uid == uid) {
+                int fd = open(fifo_shm_ptr[x].pathname, O_RDONLY);
+                char buf[MAX_BUF_SIZE];
+                bzero(buf, MAX_BUF_SIZE);
+                read(fd, buf, MAX_BUF_SIZE);
+                close(fd);
                 fifo_shm_ptr[x].is_active = false;
             }
         }
     }
     pthread_mutex_unlock(&fifo_mutex);
-    cout << "clean_user_pipe start done" << endl;
 }
 
 int create_user_pipe(int src_uid, int dst_uid) {
@@ -1379,6 +1391,7 @@ int main(int argc,char const *argv[]) {
     signal(SIGINT, signal_server_handler);
     signal(SIGQUIT, signal_server_handler);
     signal(SIGTERM, signal_server_handler);
+    signal(SIGUSR2, signal_server_handler);
 
     /* Variables */
     struct sockaddr_in c_addr;
