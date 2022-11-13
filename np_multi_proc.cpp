@@ -36,6 +36,8 @@ using namespace std;
 #define MSGSHMKEY   ((key_t) 7891)
 #define FIFOSHMKEY  ((key_t) 7892)
 #define USER_PIPE_DIR   "user_pipe/"
+#define BF_NORMAL       0
+#define BF_USER_EXIT    1
 
 typedef struct mypipe {
     int in;
@@ -67,6 +69,8 @@ typedef struct my_user {
 typedef struct my_message {
     int length;
     int counter;
+    int src_id;
+    bool is_exit;
     bool is_active;
     char content[CONTENT_SIZE];
 } Message;
@@ -94,6 +98,7 @@ int listen_sock;
 pthread_mutex_t user_mutex, msg_mutex, fifo_mutex;
 regex up_in_pattern("[<][1-9]\\d?\\d?\\d?[0]?");
 regex up_out_pattern("[>][1-9]\\d?\\d?\\d?[0]?");
+bool user_can_leave = false;
 
 /* Function Prototype */
 int get_online_user_number();
@@ -386,9 +391,16 @@ int create_user(int sock, sockaddr_in addr) {
 void user_exit_procedure(int uid) {
     logout_prompt(uid);
     clean_user_pipe(uid);
+
+    pthread_mutex_lock(&user_mutex);
     close(user_shm_ptr[uid-1].sockfd);
     bzero(&(user_shm_ptr[uid-1]), sizeof(User));
-    kill(getppid(), SIGUSR2);
+    pthread_mutex_unlock(&user_mutex);
+
+    while(user_can_leave == false) {
+        usleep(100);
+    }
+
     exit(0);
 }
 
@@ -405,6 +417,10 @@ void signal_child_handler(int sig) {
 
             if (msg_shm_ptr->counter <= 0) {
                 msg_shm_ptr->is_active = false;
+            }
+
+            if (msg_shm_ptr->is_exit && msg_shm_ptr->src_id == get_uid_by_pid(getpid())) {
+                user_can_leave = true;
             }
             pthread_mutex_unlock(&msg_mutex);
             break;
@@ -428,14 +444,14 @@ string read_msg(int uid, int sockfd) {
     char buf[MAX_BUF_SIZE];
     bzero(buf, MAX_BUF_SIZE);
 
-    // if (read(sockfd, buf, MAX_BUF_SIZE) < 0) {
-    //     perror("Read Message.");
-    //     return "";
-    // }
+    if (read(sockfd, buf, MAX_BUF_SIZE) < 0) {
+        perror("Read Message.");
+        return "";
+    }
 
-    // string msg(buf);
-    string msg;
-    getline(cin, msg);
+    string msg(buf);
+    // string msg;
+    // getline(cin, msg);
     msg.erase(remove(msg.begin(), msg.end(), '\n'), msg.end());
     msg.erase(remove(msg.begin(), msg.end(), '\r'), msg.end());
 
@@ -449,13 +465,13 @@ string read_msg(int uid, int sockfd) {
 }
 
 void sendout_msg(int sockfd, string &msg) {
-    // int n = write(sockfd, msg.c_str(), msg.length());
-    // if (n < 0) {
-    //     perror("Sendout Message");
-    //     exit(0);
-    // }
-    cout << msg;
-    fflush(stdout);
+    int n = write(sockfd, msg.c_str(), msg.length());
+    if (n < 0) {
+        perror("Sendout Message");
+        exit(0);
+    }
+    // cout << msg;
+    // fflush(stdout);
 }
 /* Network IO End */
 
@@ -468,17 +484,28 @@ bool is_white_char(string cmd) {
     return true;
 }
 
-void broadcast(string msg) {
+void broadcast(string msg, int type) {
+    int n=0;
     while (true) {
         pthread_mutex_lock(&msg_mutex);
         if (msg_shm_ptr->is_active) {
+            ++n;
+            if (msg_shm_ptr->is_exit == BF_NORMAL && n==10) {
+                bzero(msg_shm_ptr, sizeof(Message));
+            } else if (msg_shm_ptr->is_exit == BF_USER_EXIT && n==2) {
+                bzero(msg_shm_ptr, sizeof(Message));
+            }
+            // cout << "broadcast msg is " << msg_shm_ptr->content << endl;
+            // cout << "broadcast type is " << ((msg_shm_ptr->is_exit == BF_NORMAL) ? "Normal" : "Exit") << endl;
             pthread_mutex_unlock(&msg_mutex);
-            usleep(100);
+            usleep(900);
             continue;
         } else {
             msg_shm_ptr->is_active = true;
             msg_shm_ptr->counter = get_online_user_number();
             msg_shm_ptr->length = msg.length();
+            msg_shm_ptr->src_id = get_uid_by_pid(getpid());
+            msg_shm_ptr->is_exit = (type == BF_USER_EXIT);
             strncpy(msg_shm_ptr->content, msg.c_str(), msg.length());
             pthread_mutex_unlock(&msg_mutex);
             break;
@@ -503,7 +530,7 @@ void login_prompt(int uid) {
     msg = oss.str();
 
     // Broadcast
-    broadcast(msg);
+    broadcast(msg, BF_NORMAL);
 }
 
 void logout_prompt(int uid) {
@@ -515,7 +542,7 @@ void logout_prompt(int uid) {
     msg = oss.str();
 
     // Broadcast
-    broadcast(msg);
+    broadcast(msg, BF_USER_EXIT);
 }
 
 void command_prompt(int uid) {
@@ -591,7 +618,7 @@ void yell(int uid, string msg) {
     msg = oss.str();
 
     // Broadcast message
-    broadcast(msg);
+    broadcast(msg, BF_NORMAL);
 }
 
 void name_cmd(int uid, string name) {
@@ -617,7 +644,7 @@ void name_cmd(int uid, string name) {
     oss << "*** User from " << user_shm_ptr[uid-1].ip_addr << " is named '" << name << "'. ***" << endl;
     msg = oss.str();
 
-    broadcast(msg);
+    broadcast(msg, BF_NORMAL);
 }
 
 void decrement_and_cleanup_number_pipes(vector<NumberPipe> &number_pipes) {
@@ -920,7 +947,7 @@ bool handle_input_user_pipe(int uid, string cmd, int *up_idx, Context *context) 
         oss << "*** " << user_shm_ptr[uid-1].name << " (#" << uid << ") just received from "
             << user_shm_ptr[src_uid-1].name << " (#" << src_uid << ") by '" << context->original_input << "' ***" << endl;
         msg = oss.str();
-        broadcast(msg);
+        broadcast(msg, BF_NORMAL);
     }
 
     return error;
@@ -969,7 +996,7 @@ bool handle_output_user_pipe(int uid, string cmd, int *up_idx, Context *context)
             << user_shm_ptr[dst_uid-1].name << " (#" << user_shm_ptr[dst_uid-1].uid << ") ***" << endl;
         msg = oss.str();
 
-        broadcast(msg);
+        broadcast(msg, BF_NORMAL);
 
         // Create user pipe
         *up_idx = create_user_pipe(uid, dst_uid);
@@ -1177,7 +1204,7 @@ int main_executor(int uid, Command &command, Context *context) {
 
             /* Duplicate pipe */
             // STDERR -> socket
-            // dup2(user_shm_ptr[uid-1].sockfd, STDERR_FILENO);
+            dup2(user_shm_ptr[uid-1].sockfd, STDERR_FILENO);
 
             if (is_first_cmd) {
                 // Receive input from number pipe
@@ -1312,7 +1339,7 @@ int main_executor(int uid, Command &command, Context *context) {
                     }
 
                     // Redirect to socket
-                    // dup2(user_shm_ptr[uid-1].sockfd, STDOUT_FILENO);
+                    dup2(user_shm_ptr[uid-1].sockfd, STDOUT_FILENO);
                     #if 0
                     cerr << "Set output to socket " << user_shm_ptr[uid-1].sockfd << endl;
                     #endif
@@ -1404,7 +1431,7 @@ int main(int argc,char const *argv[]) {
     signal(SIGINT, signal_server_handler);
     signal(SIGQUIT, signal_server_handler);
     signal(SIGTERM, signal_server_handler);
-    signal(SIGUSR2, signal_server_handler);
+    // signal(SIGUSR2, signal_server_handler);
 
     /* Variables */
     struct sockaddr_in c_addr;
@@ -1437,16 +1464,16 @@ int main(int argc,char const *argv[]) {
             /* Child */
             // Setup signal handler
             signal(SIGUSR1, signal_child_handler);
-            signal(SIGUSR2, signal_child_handler);
+            // signal(SIGUSR2, signal_child_handler);
             signal(SIGINT, signal_child_handler);
             signal(SIGQUIT, signal_child_handler);
             signal(SIGTERM, signal_child_handler);
             // Create user
             int uid = create_user(client_sock, c_addr);
-            dup2(client_sock, STDIN_FILENO);
-            dup2(client_sock, STDOUT_FILENO);
-            dup2(client_sock, STDERR_FILENO);
-            close(client_sock);
+            // dup2(client_sock, STDIN_FILENO);
+            // dup2(client_sock, STDOUT_FILENO);
+            // dup2(client_sock, STDERR_FILENO);
+            // close(client_sock);
             serve_client(uid);
         } else {
             perror("Server fork");
