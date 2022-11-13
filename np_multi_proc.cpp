@@ -428,12 +428,14 @@ string read_msg(int sockfd) {
     char buf[MAX_BUF_SIZE];
     bzero(buf, MAX_BUF_SIZE);
 
-    if (read(sockfd, buf, MAX_BUF_SIZE) < 0) {
-        perror("Read Message.");
-        return "";
-    }
+    // if (read(sockfd, buf, MAX_BUF_SIZE) < 0) {
+    //     perror("Read Message.");
+    //     return "";
+    // }
 
-    string msg(buf);
+    // string msg(buf);
+    string msg;
+    getline(cin, msg);
     msg.erase(remove(msg.begin(), msg.end(), '\n'), msg.end());
     msg.erase(remove(msg.begin(), msg.end(), '\r'), msg.end());
     #if 0
@@ -445,11 +447,13 @@ string read_msg(int sockfd) {
 }
 
 void sendout_msg(int sockfd, string &msg) {
-    int n = write(sockfd, msg.c_str(), msg.length());
-    if (n < 0) {
-        perror("Sendout Message");
-        exit(0);
-    }
+    // int n = write(sockfd, msg.c_str(), msg.length());
+    // if (n < 0) {
+    //     perror("Sendout Message");
+    //     exit(0);
+    // }
+    cout << msg;
+    fflush(stdout);
 }
 /* Network IO End */
 
@@ -1171,7 +1175,7 @@ int main_executor(int uid, Command &command, Context *context) {
 
             /* Duplicate pipe */
             // STDERR -> socket
-            dup2(user_shm_ptr[uid-1].sockfd, STDERR_FILENO);
+            // dup2(user_shm_ptr[uid-1].sockfd, STDERR_FILENO);
 
             if (is_first_cmd) {
                 // Receive input from number pipe
@@ -1306,7 +1310,7 @@ int main_executor(int uid, Command &command, Context *context) {
                     }
 
                     // Redirect to socket
-                    dup2(user_shm_ptr[uid-1].sockfd, STDOUT_FILENO);
+                    // dup2(user_shm_ptr[uid-1].sockfd, STDOUT_FILENO);
                     #if 0
                     cerr << "Set output to socket " << user_shm_ptr[uid-1].sockfd << endl;
                     #endif
@@ -1430,6 +1434,10 @@ int main(int argc,char const *argv[]) {
             signal(SIGTERM, signal_child_handler);
             // Create user
             int uid = create_user(client_sock, c_addr);
+            dup2(client_sock, STDIN_FILENO);
+            dup2(client_sock, STDOUT_FILENO);
+            dup2(client_sock, STDERR_FILENO);
+            close(client_sock);
             serve_client(uid);
         } else {
             perror("Server fork");
