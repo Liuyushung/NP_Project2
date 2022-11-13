@@ -282,7 +282,7 @@ string read_msg(int sockfd) {
     string msg(buf);
     msg.erase(remove(msg.begin(), msg.end(), '\n'), msg.end());
     msg.erase(remove(msg.begin(), msg.end(), '\r'), msg.end());
-    #if 1
+    #if 0
     ++cmd_counter;
     printf("(%d) Recv (%ld): %s\n", cmd_counter, msg.length(), msg.c_str());
     #endif

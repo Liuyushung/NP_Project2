@@ -74,7 +74,7 @@ int main(int argc,char const *argv[]) {
                     nfds = client_sock;
                 }
 
-                #if 1
+                #if 0
                 // user_table.show_table();
                 cout << "Online users: " << user_table.table.size() << endl;
                 #endif
@@ -98,7 +98,7 @@ int main(int argc,char const *argv[]) {
         // Clean the exit users
         if (user_table.del_queue.size() > 0) {
             user_table.del_process(user_pipes);
-            #if 1
+            #if 0
             cout << "Online users: " << user_table.table.size() << endl;
             #endif
         }
