@@ -32,9 +32,9 @@ using namespace std;
 #define BUILT_IN_FALSE  0
 #define USER_LIMIT      30
 #define FIFO_LIMIT      USER_LIMIT * USER_LIMIT
-#define USERSHMKEY  ((key_t) 7890)
-#define MSGSHMKEY   ((key_t) 7891)
-#define FIFOSHMKEY  ((key_t) 7892)
+#define USERSHMKEY  ((key_t) 6650)
+#define MSGSHMKEY   ((key_t) 6651)
+#define FIFOSHMKEY  ((key_t) 6652)
 #define USER_PIPE_DIR   "user_pipe/"
 #define BF_NORMAL       0
 #define BF_USER_EXIT    1
