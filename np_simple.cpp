@@ -1,11 +1,9 @@
 /* Server 1 */
 /* Concurrent connection-oriented */
 
-#include "common.h"
 #include "npshell.h"
 
 using namespace std;
-using npshell::run_npshell;
 
 int main(int argc,char const *argv[]) {
     if (argc != 2) {

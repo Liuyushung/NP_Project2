@@ -1,19 +1,29 @@
-#include <string.h>
+#ifndef NP_SIMPLE_H
+#define NP_SIMPLE_H
+
 #include <stdio.h>
 #include <stdlib.h>
+#include <fcntl.h>
+#include <regex>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <strings.h>
+#include <string.h>
+#include <netdb.h>
+#include <signal.h>
+#include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#include <fcntl.h>
+#include <arpa/inet.h>
 #include <iostream>
 #include <sstream>
-#include <vector>
 #include <string>
-#include <regex>
+#include <map>
+#include <algorithm>
+#include <vector>
 
 using namespace std;
 
-namespace npshell {
-    
 #define DEBUG_CMD   0
 #define DEBUG_ARG   1
 
@@ -38,6 +48,33 @@ struct my_command {
 typedef struct mypipe Pipe;
 typedef struct my_number_pipe NumberPipe;
 typedef struct my_command Command;
+
+/* Function Prototype */
+// Debug Function
+void debug_vector(int type, vector<string> &cmds);
+void debug_number_pipes();
+void debug_pipes();
+// Handler
+void interrupt_handler(int sig);
+void child_handler(int sig);
+// Built-in Function
+void my_setenv(string var, string value);
+void my_printenv(string var);
+bool handle_builtin(string cmd);
+// Parse Function
+vector<string> parse_pipe(string input);
+int calc(string input);
+vector<Command> parse_number_pipe(string input);
+void parse_command(string input);
+// Executor
+void execute_command(vector<string> args);
+void main_executor(Command &command);
+int run_npshell();
+// Others
+bool is_white_char(string cmd);
+void decrement_number_pipes();
+int get_listen_socket(const char *port);
+
 
 /* Global Variables */
 vector<Pipe> pipes;
@@ -87,6 +124,18 @@ void interrupt_handler(int sig) {
     return;
 }
 
+void child_handler(int sig) {
+    // Handle SIGCHLD
+    // Prevent the zombie process
+    int stat;
+
+    while(waitpid(-1, &stat, WNOHANG) > 0) {
+        // Remove zombie process
+    }
+
+    return;
+}
+
 bool is_white_char(string cmd) {
     for (size_t i = 0; i < cmd.length(); i++) {
         if(isspace(cmd[i]) == 0) {
@@ -96,15 +145,55 @@ bool is_white_char(string cmd) {
     return true;
 }
 
-void decrement_and_cleanup_number_pipes() {
-    vector<int> index;
-
+void decrement_number_pipes() {
     for (size_t i = 0; i < number_pipes.size(); i++) {
-        if( --number_pipes[i].number < -1 ) index.push_back(i);
+        --number_pipes[i].number;
     }
-    for (int i = index.size()-1; i >= 0; --i) {
-        number_pipes.erase(number_pipes.begin() + index[i]);
+}
+
+int get_listen_socket(const char *port) {
+    struct sockaddr_in s_addr;
+    int listen_sock;
+    int status_code;
+
+    // Init variable
+    bzero((char *)&s_addr, sizeof(s_addr));
+
+    // Init server address
+    s_addr.sin_family = AF_INET;
+    s_addr.sin_addr.s_addr = INADDR_ANY;
+    s_addr.sin_port = htons((u_short)atoi(port));
+
+    // Create socket
+    listen_sock = socket(s_addr.sin_family, SOCK_STREAM, 0);
+    if (listen_sock < 0) {
+        perror("Server create socket");
+        exit(0);
     }
+
+    // Socket setting
+    int optval = 1;
+    status_code = setsockopt(listen_sock, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int));
+    if (status_code < 0) {
+        perror("Set socket option");
+        exit(0);
+    }
+
+    // Bind socket
+    status_code = bind(listen_sock, (struct sockaddr *) &s_addr, sizeof(s_addr));
+    if (status_code < 0) {
+        perror("Server bind");
+        exit(0);
+    }
+
+    // Listen socket
+    status_code = listen(listen_sock, 5);
+    if (status_code < 0) {
+        perror("Server listen");
+        exit(0);
+    }
+
+    return listen_sock;
 }
 
 void my_setenv(string var, string value) {
@@ -306,7 +395,7 @@ void execute_command(vector<string> args) {
 
 void main_executor(Command &command) {
     /* Pre-Process */
-    decrement_and_cleanup_number_pipes();
+    decrement_number_pipes();
     if (command.cmds.size() == 1) {
         if (handle_builtin(command.cmds[0]))    return;
     }
@@ -578,4 +667,5 @@ int run_npshell() {
 
     return 0;
 }
-} // namespace npshell
+
+#endif
