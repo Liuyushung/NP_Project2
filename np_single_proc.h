@@ -606,7 +606,6 @@ void clean_user_pipe() {
         if( user_pipes[i].is_done ) index.push_back(i);
     }
     for (int i = index.size()-1; i >= 0; --i) {
-        cerr << "Clean User Pipe: " << i << endl;
         user_pipes.erase(user_pipes.begin() + index[i]);
     }
 }

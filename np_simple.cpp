@@ -1,7 +1,7 @@
 /* Server 1 */
 /* Concurrent connection-oriented */
 
-#include "npshell.h"
+#include "np_simple.h"
 
 using namespace std;
 
