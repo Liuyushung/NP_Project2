@@ -19,6 +19,7 @@
 #include <map>
 #include <algorithm>
 #include <vector>
+#include <cctype>
 
 using namespace std;
 
@@ -142,6 +143,15 @@ namespace user_space {
             return (iter != this->table.end());
         }
 
+        bool has_user(string name) {
+            for (auto &elem: this->table) {
+                if (elem.second->get_name().compare(name) == 0) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         void put_user_to_del_queue(int id) {
             this->del_queue.push_back(id);
         }
@@ -174,6 +184,16 @@ namespace user_space {
             int tid;
             for (auto &elem: this->table) {
                 if (elem.second->get_sockfd() == sockfd) {
+                    tid = elem.first;
+                }
+            }
+            return this->table[tid];
+        }
+
+        UserInfo *get_user_by_name(string peer) {
+            int tid;
+            for (auto &elem: this->table) {
+                if (elem.second->get_name().compare(peer) == 0) {
                     tid = elem.first;
                 }
             }
@@ -380,24 +400,39 @@ void who(user_space::UserInfo *me) {
     sendout_msg(me->get_sockfd(), msg);
 }
 
-void tell(user_space::UserInfo *me, int id, string msg) {
+void tell(user_space::UserInfo *me, string id_or_name, string msg) {
     ostringstream oss;
 
-    if (user_space::user_table.has_user(id)) {
-        user_space::UserInfo *target_user = user_space::user_table.get_user_by_id(id);
+    if (isdigit(id_or_name.c_str()[0])) {
+        int id = atoi(id_or_name.c_str());
 
-        // Create message
-        oss << "*** " << me->get_name() << " told you ***: " << msg << endl;
-        msg = oss.str();
+        if (user_space::user_table.has_user(id)) {
+            user_space::UserInfo *target_user = user_space::user_table.get_user_by_id(id);
 
-        // Send out message
-        sendout_msg(target_user->get_sockfd(), msg);
+            // Create message
+            oss << "*** " << me->get_name() << " told you ***: " << msg << endl;
+            msg = oss.str();
+
+            // Send out message
+            sendout_msg(target_user->get_sockfd(), msg);
+        } else {
+            // User is not exist
+            oss << "*** Error: user #" << id << " does not exist yet. ***" << endl;
+            msg = oss.str();
+
+            sendout_msg(me->get_sockfd(), msg);
+        }
     } else {
-        // User is not exist
-        oss << "*** Error: user #" << id << " does not exist yet. ***" << endl;
-        msg = oss.str();
+        if (user_space::user_table.has_user(id_or_name)) {
+            user_space::UserInfo *target_user = user_space::user_table.get_user_by_name(id_or_name);
 
-        sendout_msg(me->get_sockfd(), msg);
+            // Create message
+            oss << "*** " << me->get_name() << " told you ***: " << msg << endl;
+            msg = oss.str();
+
+            // Send out message
+            sendout_msg(target_user->get_sockfd(), msg);
+        }
     }
 }
 
@@ -470,7 +505,7 @@ int handle_builtin(user_space::UserInfo *me, string cmd) {
         getline(iss, id, ' ');
         getline(iss, msg);
 
-        tell(me, atoi(id.c_str()), msg);
+        tell(me, id, msg);
 
         return BUILT_IN_TRUE;
     } else if (prog == "yell") {
