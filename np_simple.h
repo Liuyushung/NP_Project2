@@ -490,7 +490,6 @@ void main_executor(Command &command) {
             /* Close Pipe */
             // Normal Pipe
             if (i != 0) {
-                // cout << "Parent Close pipe: " << i-1 << endl;
                 close(pipes[i-1].in);
                 close(pipes[i-1].out);
             }
@@ -592,6 +591,11 @@ void main_executor(Command &command) {
                         }
                     }
                 } else if (is_error_pipe) {
+                    /* Setup Input */
+                    if (pipes.size() > 0) {
+                        dup2(pipes[i-1].in, STDIN_FILENO);
+                    }
+                    /* Setup Output and Error */
                     for (size_t x = 0; x < number_pipes.size(); x++) {
                         if (number_pipes[x].number == command.number) {
                             dup2(number_pipes[x].out, STDOUT_FILENO);
@@ -600,6 +604,7 @@ void main_executor(Command &command) {
                         }
                     }
                 } else {
+                    /* Setup Input */
                     if (pipes.size() > 0) {
                         dup2(pipes[i-1].in, STDIN_FILENO);
                         #if 0

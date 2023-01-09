@@ -282,12 +282,6 @@ void signal_server_handler(int sig) {
             // Remove zombie process
         }
 
-    } else if (sig == SIGINT || sig == SIGQUIT || sig == SIGTERM) {
-        server_exit_procedure();
-    } else if (sig == SIGUSR2) {
-        #if 0
-        cout << "Online user: " << get_online_user_number() << endl;
-        #endif
     }
 }
 
@@ -1338,6 +1332,11 @@ int main_executor(int uid, Command &command, Context *context) {
                     cerr << "Final Error Pipe" << endl;
                     #endif
                     /* Error Pipe */
+                    /* Setup Input */
+                    if (context->pipes.size() > 0) {
+                        dup2(context->pipes[i-1].in, STDIN_FILENO);
+                    }
+                    /* Setup Output and Error */
                     for (size_t x = 0; x < context->number_pipes.size(); x++) {
                         if (context->number_pipes[x].number == command.number) {
                             dup2(context->number_pipes[x].out, STDOUT_FILENO);
@@ -1396,10 +1395,6 @@ int main_executor(int uid, Command &command, Context *context) {
                 close(context->number_pipes[ci].in);
                 close(context->number_pipes[ci].out);
             }
-            // for (int x=0; x < fifo_shm_ptr.size(); ++x) {
-            //     close(fifo_shm_ptr[x].pipe.in);
-            //     close(fifo_shm_ptr[x].pipe.out);
-            // }
 
             execute_command(uid, args);
         }
@@ -1439,6 +1434,8 @@ void serve_client(int uid) {
     // Set default PATH
     context.env["PATH"] = "bin:.";
     setenv("PATH", "bin:.", 1);
+
+    signal(SIGCHLD, signal_server_handler);
 
     while (true) {
         string input = read_msg(uid, user_shm_ptr[uid-1].sockfd);

@@ -1217,6 +1217,11 @@ int main_executor(user_space::UserInfo *me, Command &command) {
                     cerr << "Final Error Pipe" << endl;
                     #endif
                     /* Error Pipe */
+                    /* Setup Input */
+                    if (me->pipes.size() > 0) {
+                        dup2(me->pipes[i-1].in, STDIN_FILENO);
+                    }
+                    /* Setup Output and Error */
                     for (size_t x = 0; x < me->number_pipes.size(); x++) {
                         if (me->number_pipes[x].number == command.number) {
                             dup2(me->number_pipes[x].out, STDOUT_FILENO);
